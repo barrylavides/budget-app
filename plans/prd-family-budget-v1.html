@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PRD — FamilyBudget Expense Tracker v1</title>
+<style>
+  :root {
+    --ivory:    #FAF9F5;
+    --paper:    #FFFFFF;
+    --slate:    #141413;
+    --clay:     #D97757;
+    --clay-d:   #B85C3E;
+    --oat:      #E3DACC;
+    --olive:    #788C5D;
+    --g100:     #F0EEE6;
+    --g200:     #E6E3DA;
+    --g300:     #D1CFC5;
+    --g500:     #87867F;
+    --g700:     #3D3D3A;
+    --green:    #16a34a;
+    --green-bg: #E4E9DC;
+    --red:      #dc2626;
+    --red-bg:   #F3D9CC;
+    --amber:    #b45309;
+    --amber-bg: #FFF7ED;
+    --blue:     #1d4ed8;
+    --blue-bg:  #eff6ff;
+    --serif: ui-serif, Georgia, 'Times New Roman', serif;
+    --sans:  system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --mono:  ui-monospace, 'SF Mono', Menlo, Monaco, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--sans);
+    background: var(--ivory);
+    color: var(--g700);
+    line-height: 1.55;
+    padding: 56px 32px 120px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1120px; margin: 0 auto; }
+
+  /* header */
+  header.page-head { margin-bottom: 48px; max-width: 820px; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--g500);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 24px; height: 1.5px;
+    background: var(--clay);
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(32px, 4.5vw, 44px);
+    line-height: 1.12;
+    color: var(--slate);
+    margin-bottom: 12px;
+    letter-spacing: -0.015em;
+  }
+  h1 em { font-style: italic; color: var(--clay); }
+  .subtitle {
+    font-size: 16.5px;
+    color: var(--g700);
+    max-width: 620px;
+    margin-bottom: 24px;
+  }
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--green-bg);
+    color: #4B5C39;
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-weight: 600;
+  }
+  .status-badge::before {
+    content: "";
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--olive);
+  }
+
+  /* toc */
+  nav.toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 28px 0 0;
+    border-top: 1.5px solid var(--g300);
+    margin-top: 28px;
+  }
+  nav.toc a {
+    font-size: 12.5px;
+    padding: 7px 14px;
+    border: 1.5px solid var(--g300);
+    border-radius: 999px;
+    text-decoration: none;
+    color: var(--g700);
+    background: var(--paper);
+    transition: border-color 120ms, color 120ms;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+  nav.toc a .n {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--g500);
+  }
+  nav.toc a:hover { border-color: var(--slate); color: var(--slate); }
+  nav.toc a:hover .n { color: var(--clay); }
+
+  /* summary strip */
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 64px;
+    margin-top: 48px;
+  }
+  @media (max-width: 900px) { .summary { grid-template-columns: repeat(2, 1fr); } }
+  .summary .cell {
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .summary .k {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--g500);
+    margin-bottom: 6px;
+  }
+  .summary .v {
+    font-size: 17px;
+    color: var(--slate);
+    font-weight: 600;
+  }
+  .summary .v.accent { color: var(--clay); }
+  .summary .v.olive { color: var(--olive); }
+  .summary .sub {
+    font-size: 12px;
+    color: var(--g500);
+    margin-top: 4px;
+  }
+
+  /* sections */
+  section { margin-bottom: 64px; scroll-margin-top: 28px; }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 8px;
+  }
+  .sec-head .num {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--oat);
+    color: var(--slate);
+    padding: 3px 9px;
+    border-radius: 8px;
+    font-weight: 600;
+  }
+  .sec-head h2 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 26px;
+    color: var(--slate);
+    letter-spacing: -0.01em;
+  }
+  .sec-intro {
+    font-size: 14.5px;
+    color: var(--g500);
+    max-width: 720px;
+    margin-bottom: 28px;
+  }
+  h3 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 19px;
+    color: var(--slate);
+    margin: 28px 0 12px;
+    letter-spacing: -0.008em;
+  }
+  p { margin-bottom: 12px; font-size: 14.5px; line-height: 1.6; }
+
+  /* user story cards */
+  .story-group { margin-bottom: 32px; }
+  .story-group-title {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--g500);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .story-group-title .icon { font-size: 14px; }
+  .story-group-title .count {
+    background: var(--g100);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+  }
+  .stories {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--paper);
+  }
+  .story {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    gap: 0;
+    border-bottom: 1px solid var(--g200);
+    transition: background 80ms;
+  }
+  .story:last-child { border-bottom: none; }
+  .story:hover { background: var(--g100); }
+  .story .sn {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--g500);
+    padding: 12px 0 12px 14px;
+    text-align: right;
+    padding-right: 0;
+  }
+  .story .st {
+    padding: 12px 16px;
+    font-size: 13.5px;
+    color: var(--g700);
+    line-height: 1.5;
+  }
+  .story .actor { font-weight: 600; color: var(--slate); }
+  .story .feature { color: var(--clay); font-weight: 500; }
+
+  /* decision cards */
+  .decisions {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-width: 860px;
+  }
+  .decision {
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+  .decision .d-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--slate);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .decision .d-title .d-icon { font-size: 16px; }
+  .decision .d-body {
+    font-size: 13.5px;
+    color: var(--g700);
+    line-height: 1.6;
+  }
+  .decision .d-body code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--g100);
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: var(--slate);
+  }
+
+  /* module grid */
+  .mod-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+  }
+  .mod-card {
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    padding: 18px 20px;
+    transition: transform 150ms, box-shadow 150ms, border-color 150ms;
+  }
+  .mod-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(20,20,19,.08);
+    border-color: var(--slate);
+  }
+  .mod-name {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--slate);
+    margin-bottom: 6px;
+  }
+  .mod-desc {
+    font-size: 12.5px;
+    color: var(--g500);
+    line-height: 1.45;
+  }
+  .mod-badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    margin-top: 10px;
+    font-weight: 600;
+  }
+  .mod-badge.pure { background: var(--green-bg); color: #4B5C39; }
+  .mod-badge.crud { background: var(--oat); color: var(--slate); }
+  .mod-badge.ui { background: var(--blue-bg); color: var(--blue); }
+
+  /* schema block */
+  .code-block {
+    background: var(--slate);
+    border-radius: 12px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin: 16px 0;
+    max-width: 860px;
+  }
+  .code-block pre {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: #E8E6DE;
+    white-space: pre;
+  }
+  .code-block .kw  { color: var(--clay); }
+  .code-block .str { color: var(--olive); }
+  .code-block .cm  { color: var(--g500); }
+
+  /* tech table */
+  .tech-table {
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--paper);
+    max-width: 860px;
+  }
+  .tech-table .row {
+    display: grid;
+    grid-template-columns: 160px 200px 1fr;
+    gap: 0;
+  }
+  @media (max-width: 780px) { .tech-table .row { grid-template-columns: 1fr; } }
+  .tech-table .row + .row { border-top: 1px solid var(--g200); }
+  .tech-table .cell { padding: 12px 18px; font-size: 13.5px; }
+  .tech-table .cell + .cell { border-left: 1px solid var(--g200); }
+  @media (max-width: 780px) { .tech-table .cell + .cell { border-left: none; border-top: 1px dashed var(--g300); } }
+  .tech-table .head {
+    background: var(--g100);
+    font-weight: 600;
+    color: var(--slate);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .tech-table .cell .val { font-weight: 600; color: var(--slate); }
+
+  /* test table */
+  .test-table {
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--paper);
+  }
+  .test-table .row {
+    display: grid;
+    grid-template-columns: 180px 110px 1fr;
+    gap: 0;
+  }
+  @media (max-width: 860px) { .test-table .row { grid-template-columns: 1fr; } }
+  .test-table .row + .row { border-top: 1px solid var(--g200); }
+  .test-table .cell { padding: 12px 18px; font-size: 13px; line-height: 1.5; }
+  .test-table .cell + .cell { border-left: 1px solid var(--g200); }
+  @media (max-width: 860px) { .test-table .cell + .cell { border-left: none; border-top: 1px dashed var(--g300); } }
+  .test-table .head {
+    background: var(--g100);
+    font-weight: 600;
+    color: var(--slate);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .test-badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-weight: 600;
+  }
+  .test-badge.unit { background: var(--green-bg); color: #4B5C39; }
+  .test-badge.integ { background: var(--oat); color: var(--slate); }
+  .test-badge.comp { background: var(--blue-bg); color: var(--blue); }
+
+  /* out of scope */
+  .oos-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+  }
+  .oos-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-radius: 10px;
+    font-size: 13.5px;
+    color: var(--g700);
+  }
+  .oos-item .x {
+    font-size: 14px;
+    color: var(--g500);
+    flex-shrink: 0;
+  }
+
+  /* notes */
+  .notes {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 820px;
+  }
+  .note {
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-left: 4px solid var(--clay);
+    border-radius: 10px;
+    padding: 16px 20px;
+  }
+  .note .note-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--slate);
+    margin-bottom: 4px;
+  }
+  .note .note-body {
+    font-size: 13.5px;
+    color: var(--g500);
+    line-height: 1.55;
+  }
+
+  /* footer */
+  footer {
+    margin-top: 80px;
+    border-top: 1.5px solid var(--g300);
+    padding-top: 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 20px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--g500);
+  }
+  footer .k { font-family: var(--serif); font-style: italic; color: var(--g700); font-size: 15px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ HEADER ============ -->
+  <header class="page-head">
+    <div class="eyebrow">Product Requirements Document</div>
+    <h1>FamilyBudget <em>Expense Tracker</em> &mdash; Phase 1</h1>
+    <p class="subtitle">
+      A persistent, multi-user family budget app for a couple who manage household finances
+      in weekly meetings. Built on the existing UI prototype, backed by Supabase, hosted on Vercel.
+    </p>
+    <span class="status-badge">Ready for agent</span>
+
+    <nav class="toc">
+      <a href="#problem"><span class="n">01</span> Problem</a>
+      <a href="#solution"><span class="n">02</span> Solution</a>
+      <a href="#stories"><span class="n">03</span> User Stories</a>
+      <a href="#decisions"><span class="n">04</span> Implementation</a>
+      <a href="#testing"><span class="n">05</span> Testing</a>
+      <a href="#oos"><span class="n">06</span> Out of Scope</a>
+      <a href="#notes"><span class="n">07</span> Notes</a>
+    </nav>
+  </header>
+
+  <!-- ============ SUMMARY STRIP ============ -->
+  <div class="summary">
+    <div class="cell">
+      <div class="k">Users</div>
+      <div class="v">2</div>
+      <div class="sub">Barry + wife (shared household)</div>
+    </div>
+    <div class="cell">
+      <div class="k">User Stories</div>
+      <div class="v accent">67</div>
+      <div class="sub">Across 10 feature areas</div>
+    </div>
+    <div class="cell">
+      <div class="k">Modules</div>
+      <div class="v olive">10</div>
+      <div class="sub">2 pure / 6 CRUD / 2 UI</div>
+    </div>
+    <div class="cell">
+      <div class="k">Backend</div>
+      <div class="v">Supabase</div>
+      <div class="sub">Postgres + Auth + RLS, free tier</div>
+    </div>
+  </div>
+
+  <!-- ============ 01 PROBLEM ============ -->
+  <section id="problem">
+    <div class="sec-head"><span class="num">01</span><h2>Problem Statement</h2></div>
+    <p class="sec-intro">
+      A couple manages their household finances through a weekly budget meeting on a laptop.
+      They currently have no persistent tool &mdash; the existing prototype is an in-memory React app
+      that loses all data on refresh.
+    </p>
+    <div class="decisions">
+      <div class="decision">
+        <div class="d-body">
+          They need a real, hosted expense tracker that: <strong>survives a browser refresh</strong> (persistent data);
+          is <strong>accessible from any device</strong> with internet (for travel); supports <strong>two authenticated users</strong>
+          editing a shared household budget; models their specific financial structure &mdash; <strong>two salary halves per month</strong>
+          (paid on the 25th and 30th), multiple income sources per half, categorised and tagged expenses, per-expense
+          payment tracking, and carry-over deficits from prior periods; and <strong>eliminates repetitive manual entry</strong>
+          of recurring monthly expenses (electric, internet, groceries, school fees, etc.).
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 02 SOLUTION ============ -->
+  <section id="solution">
+    <div class="sec-head"><span class="num">02</span><h2>Solution</h2></div>
+    <p class="sec-intro">
+      Build a persistent, multi-user web application that ports the existing UI prototype into a
+      production-grade family expense tracker backed by Supabase.
+    </p>
+    <div class="decisions">
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">1&#xFE0F;&#x20E3;</span> Phase 1 &mdash; Browser web app</div>
+        <div class="d-body">
+          Laptop-optimised browser app with Google OAuth sign-in, shared household model,
+          full prototype feature parity (months, halves, sources, expenses, payments, carry-overs, tags, statistics),
+          plus a new recurring-expense-template system. Hosted on Vercel.
+        </div>
+      </div>
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">2&#xFE0F;&#x20E3;</span> Phase 2 &mdash; PWA mobile</div>
+        <div class="d-body">
+          Mobile-responsive layout, PWA install, quick-add expense on phone, realtime sync between devices. Out of scope for this PRD.
+        </div>
+      </div>
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">3&#xFE0F;&#x20E3;</span> Phase 3 &mdash; React Native</div>
+        <div class="d-body">
+          Native iOS &amp; Android apps sharing business logic with the web app. Out of scope for this PRD.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 USER STORIES ============ -->
+  <section id="stories">
+    <div class="sec-head"><span class="num">03</span><h2>User Stories</h2></div>
+    <p class="sec-intro">67 stories across 10 feature areas, covering the full surface of phase 1.</p>
+
+    <!-- Auth -->
+    <div class="story-group">
+      <div class="story-group-title"><span class="icon">&#x1F512;</span> Authentication &amp; Household <span class="count">7</span></div>
+      <div class="stories">
+        <div class="story"><span class="sn">1</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">sign in with my Google account</span>, so that I don't have to remember a separate password.</div></div>
+        <div class="story"><span class="sn">2</span><div class="st">As a <span class="actor">first-time user</span>, I want to <span class="feature">create a household and set my display name</span>, so that expenses can be attributed to me.</div></div>
+        <div class="story"><span class="sn">3</span><div class="st">As a <span class="actor">household owner</span>, I want to <span class="feature">invite my spouse via a link</span>, so that they join my household without manual configuration.</div></div>
+        <div class="story"><span class="sn">4</span><div class="st">As a <span class="actor">spouse receiving an invite</span>, I want to <span class="feature">click a link, sign in, and land in the shared household</span>, so that onboarding is frictionless.</div></div>
+        <div class="story"><span class="sn">5</span><div class="st">As a <span class="actor">signed-in user</span>, I want to <span class="feature">be redirected away from the sign-in page automatically</span>, so that I don't navigate manually after login.</div></div>
+        <div class="story"><span class="sn">6</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">remain signed in after closing and reopening the browser</span>, so that I don't re-authenticate every session.</div></div>
+        <div class="story"><span class="sn">7</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">my data protected so no one outside my household can see or modify it</span>.</div></div>
+      </div>
+    </div>
+
+    <!-- Month Management -->
+    <div class="story-group">
+      <div class="story-group-title"><span class="icon">&#x1F4C5;</span> Month Management <span class="count">5</span></div>
+      <div class="stories">
+        <div class="story"><span class="sn">8</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">see a sidebar listing all budget months in chronological order</span>, so that I can navigate between them.</div></div>
+        <div class="story"><span class="sn">9</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">create a new month</span>, so that I can start planning next month's budget.</div></div>
+        <div class="story"><span class="sn">10</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">the selected month highlighted in the sidebar</span>, so that I always know which month I'm viewing.</div></div>
+        <div class="story"><span class="sn">11</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">collapse the sidebar to gain screen space</span>, so that I can focus on the data.</div></div>
+        <div class="story"><span class="sn">12</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">each month to display a user count indicator</span>, so that I get a quick activity signal.</div></div>
+      </div>
+    </div>
+
+    <!-- Sources -->
+    <div class="story-group">
+      <div class="story-group-title"><span class="icon">&#x1F4B3;</span> Income Sources <span class="count">6</span></div>
+      <div class="stories">
+        <div class="story"><span class="sn">13</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">add income sources</span> (e.g., "Wife Payroll &mdash; BDO &mdash; 1st Half &mdash; 40,000"), so that I can track where money comes from.</div></div>
+        <div class="story"><span class="sn">14</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">each source to specify which half it belongs to</span> (1st, 2nd, or both), so that sources align with salary schedules.</div></div>
+        <div class="story"><span class="sn">15</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">see the remaining balance of each source</span> (original minus payments), so that I know how much is left.</div></div>
+        <div class="story"><span class="sn">16</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">edit a source's name, type, account label, half, and balance</span>, so I can correct mistakes.</div></div>
+        <div class="story"><span class="sn">17</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">delete a source</span>, so that I can remove ones added in error.</div></div>
+        <div class="story"><span class="sn">18</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">sources categorised by type</span> (Salary, Debt Collected, Savings Withdrawal), so the origin is clear.</div></div>
+      </div>
+    </div>
+
+    <!-- Expenses -->
+    <div class="story-group">
+      <div class="story-group-title"><span class="icon">&#x1F9FE;</span> Expenses <span class="count">9</span></div>
+      <div class="stories">
+        <div class="story"><span class="sn">19</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">add an expense with name, category, half, amount, source, and optional tag</span>, so I can plan spending.</div></div>
+        <div class="story"><span class="sn">20</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">assign a category</span> (Bills, Food, Utilities, Home, Travel, Health, Education, Other), so spending is grouped.</div></div>
+        <div class="story"><span class="sn">21</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">tag an expense</span> (Needs, Wants, Savings, Investment, Business), so I can track 50/30/20 alignment.</div></div>
+        <div class="story"><span class="sn">22</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">edit any field on an existing expense</span>, so I can adjust as plans change.</div></div>
+        <div class="story"><span class="sn">23</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">delete an expense with a confirmation dialog</span>, so I don't lose data accidentally.</div></div>
+        <div class="story"><span class="sn">24</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">see expenses in grid (card) or list view</span>, so I can choose my preferred visualisation.</div></div>
+        <div class="story"><span class="sn">25</span><div class="st">As a <span class="actor">user</span>, I want my <span class="feature">grid/list view preference remembered</span>, so I don't re-select every time.</div></div>
+        <div class="story"><span class="sn">26</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">drill into a category to see all expenses within it</span>, so I can inspect individual items.</div></div>
+        <div class="story"><span class="sn">27</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">breadcrumb trail</span> ("All Categories &gt; Food") when drilling in, so I can navigate back.</div></div>
+      </div>
+    </div>
+
+    <!-- Half Views -->
+    <div class="story-group">
+      <div class="story-group-title"><span class="icon">&#x1F4CA;</span> Half Views &amp; Overview <span class="count">6</span></div>
+      <div class="stories">
+        <div class="story"><span class="sn">28</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">segmented control to switch between All, 1st Half, and 2nd Half</span>, so I can focus on one salary period.</div></div>
+        <div class="story"><span class="sn">29</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">each half segment to show the salary amount beside its label</span>, so I see the envelope at a glance.</div></div>
+        <div class="story"><span class="sn">30</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">summary cards</span> (total income, budgeted, paid, remaining, utilisation bar), so I get a dashboard view.</div></div>
+        <div class="story"><span class="sn">31</span><div class="st">As a <span class="actor">user</span>, I want the <span class="feature">Remaining card to turn red when overspent</span>, so I get a visual warning.</div></div>
+        <div class="story"><span class="sn">32</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">set a monthly budget target with a progress bar</span>, so I can track against a goal.</div></div>
+        <div class="story"><span class="sn">33</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">per-half breakdown</span> (income vs. expenses vs. remaining) shown side by side.</div></div>
+      </div>
+    </div>
+
+    <!-- Payments -->
+    <div class="story-group">
+      <div class="story-group-title"><span class="icon">&#x1F4B0;</span> Payments <span class="count">7</span></div>
+      <div class="stories">
+        <div class="story"><span class="sn">34</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">record a payment</span> (date, amount, source, note), so I can track what's actually been paid.</div></div>
+        <div class="story"><span class="sn">35</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">record multiple partial payments</span> for a single expense, so I can handle instalments.</div></div>
+        <div class="story"><span class="sn">36</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">each payment to deduct from the source's remaining balance</span>, so available funds are always accurate.</div></div>
+        <div class="story"><span class="sn">37</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">status pill</span> (Paid / Partial / Unpaid) on each expense row based on payments vs. budget.</div></div>
+        <div class="story"><span class="sn">38</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">click the status pill to open a payments modal</span> showing all payments and an add form.</div></div>
+        <div class="story"><span class="sn">39</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">delete an individual payment</span>, so I can correct mistakes.</div></div>
+        <div class="story"><span class="sn">40</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">total paid / total due / remaining strip</span> in the payments modal, so I know the position.</div></div>
+      </div>
+    </div>
+
+    <!-- Carry-Overs -->
+    <div class="story-group">
+      <div class="story-group-title"><span class="icon">&#x1F504;</span> Carry-Overs <span class="count">7</span></div>
+      <div class="stories">
+        <div class="story"><span class="sn">41</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">create a carry-over item</span> (origin label, amount, assigned source), so shortfalls are tracked.</div></div>
+        <div class="story"><span class="sn">42</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">assign multiple sources to cover a single deficit</span>, so I can spread the shortfall.</div></div>
+        <div class="story"><span class="sn">43</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">carry-over amounts to pre-deduct from the assigned source's effective remaining</span>, so I don't double-allocate.</div></div>
+        <div class="story"><span class="sn">44</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">resolve a carry-over individually</span>, so I can clear debts one by one.</div></div>
+        <div class="story"><span class="sn">45</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">"Resolve All" button</span> when there are 2+ pending carry-overs, for bulk clearing.</div></div>
+        <div class="story"><span class="sn">46</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">resolved carry-overs to remain visible</span> with a struck-through style and resolution date.</div></div>
+        <div class="story"><span class="sn">47</span><div class="st">As a <span class="actor">user</span>, I want an <span class="feature">amber warning banner</span> at the top when there are pending carry-overs, showing origin and total.</div></div>
+      </div>
+    </div>
+
+    <!-- Recurring Templates -->
+    <div class="story-group">
+      <div class="story-group-title"><span class="icon">&#x1F501;</span> Recurring Expense Templates <span class="count">8</span></div>
+      <div class="stories">
+        <div class="story"><span class="sn">48</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">create a recurring template</span> (name, category, half, amount, source name, tag, cadence).</div></div>
+        <div class="story"><span class="sn">49</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">set cadence to monthly, quarterly, or yearly</span>, for non-monthly costs too.</div></div>
+        <div class="story"><span class="sn">50</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">activate or deactivate a template</span>, to pause items without deleting.</div></div>
+        <div class="story"><span class="sn">51</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">edit or delete a template</span>, to adjust when costs change.</div></div>
+        <div class="story"><span class="sn">52</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">templates auto-generated into a new month on creation</span>, so I don't manually add 10+ items.</div></div>
+        <div class="story"><span class="sn">53</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">toast notification</span> after month creation telling me how many expenses were generated.</div></div>
+        <div class="story"><span class="sn">54</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">generated expenses to match template source by name</span> to the closest source in the new month.</div></div>
+        <div class="story"><span class="sn">55</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">dedicated Recurring Templates page</span> accessible from the sidebar or header.</div></div>
+      </div>
+    </div>
+
+    <!-- Statistics -->
+    <div class="story-group">
+      <div class="story-group-title"><span class="icon">&#x1F4C8;</span> Statistics <span class="count">5</span></div>
+      <div class="stories">
+        <div class="story"><span class="sn">56</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">donut chart of spending by category</span>, with a legend listing each category's amount and percentage.</div></div>
+        <div class="story"><span class="sn">57</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">donut chart of spending by tag</span> (Needs/Wants/Savings/etc.) for 50/30/20 evaluation.</div></div>
+        <div class="story"><span class="sn">58</span><div class="st">As a <span class="actor">user</span>, I want a <span class="feature">horizontal bar chart comparing spending across categories</span>, so I can rank spending areas.</div></div>
+        <div class="story"><span class="sn">59</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">summary cards</span> (total income, total expenses, net remaining) at the top of statistics.</div></div>
+        <div class="story"><span class="sn">60</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">statistics to reflect the currently selected month</span>, so data is contextually relevant.</div></div>
+      </div>
+    </div>
+
+    <!-- General UX -->
+    <div class="story-group">
+      <div class="story-group-title"><span class="icon">&#x2728;</span> General UX <span class="count">7</span></div>
+      <div class="stories">
+        <div class="story"><span class="sn">61</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">toast notifications for save, delete, and error actions</span>, so I get feedback.</div></div>
+        <div class="story"><span class="sn">62</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">empty states</span> (no months, no expenses, no sources) to show helpful prompts.</div></div>
+        <div class="story"><span class="sn">63</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">amounts formatted in Philippine Peso</span> throughout the app.</div></div>
+        <div class="story"><span class="sn">64</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">row actions (edit, delete) to appear on hover</span> in expense tables, so the table stays clean.</div></div>
+        <div class="story"><span class="sn">65</span><div class="st">As a <span class="actor">user</span>, I want <span class="feature">confirmation dialogs before destructive actions</span>, so I don't lose data accidentally.</div></div>
+        <div class="story"><span class="sn">66</span><div class="st">As a <span class="actor">user</span>, I want the <span class="feature">app to load quickly with skeleton states</span> while data is fetching.</div></div>
+        <div class="story"><span class="sn">67</span><div class="st">As a <span class="actor">user</span>, I want to <span class="feature">know who created each expense and when</span>, for basic attribution.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 04 IMPLEMENTATION DECISIONS ============ -->
+  <section id="decisions">
+    <div class="sec-head"><span class="num">04</span><h2>Implementation Decisions</h2></div>
+    <p class="sec-intro">Key architectural, data model, and tech stack choices that shape the build.</p>
+
+    <h3>Architecture</h3>
+    <div class="decisions">
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">&#x1F3D7;</span> No custom backend</div>
+        <div class="d-body">The React app communicates directly with Supabase using <code>@supabase/supabase-js</code>. Row-level security (RLS) policies on Postgres enforce data isolation per household.</div>
+      </div>
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">&#x1F3E0;</span> Household model</div>
+        <div class="d-body">A <code>households</code> table with a <code>household_members</code> join table. All data tables are scoped to a household. RLS policies use a <code>user_household_ids(auth.uid())</code> helper function.</div>
+      </div>
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">&#x1F511;</span> Auth: Google OAuth via Supabase</div>
+        <div class="d-body">One-click sign-in. Session persists in the browser. <code>AuthGate</code> component redirects unauthenticated users. Household owner generates an invite code/link for the spouse.</div>
+      </div>
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">&#x1F465;</span> Concurrency: one driver, one watcher</div>
+        <div class="d-body">Phase 1 uses standard REST-style reads/writes. No realtime sync. All tables include <code>updated_at</code> columns for future conflict detection in phase 2.</div>
+      </div>
+    </div>
+
+    <h3>Data Model</h3>
+    <div class="decisions">
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">&#x1F4C6;</span> Months</div>
+        <div class="d-body">Scoped to household with unique constraint on <code>(household_id, year, month_num)</code>. Stores <code>half1_salary_date</code> and <code>half2_salary_date</code> as text.</div>
+      </div>
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">&#x1F4B3;</span> Sources</div>
+        <div class="d-body">Belong to a month. Each has a <code>half</code> field (<code>half1</code> | <code>half2</code> | <code>both</code>) and a <code>balance</code>. Remaining balance computed at query time: <code>balance - sum(payments)</code>.</div>
+      </div>
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">&#x1F9FE;</span> Expenses + Payments</div>
+        <div class="d-body">Expenses belong to a month with <code>half</code>, <code>source_id</code>, and <code>tag</code>. Payments belong to an expense, each with its own <code>source_id</code> (may differ from intended source), <code>amount</code>, <code>paid_on</code>, and <code>note</code>.</div>
+      </div>
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">&#x1F504;</span> Carry-overs</div>
+        <div class="d-body">Belong to a month. One deficit can produce multiple items (one per source allocation). Each has <code>resolved_at</code> (null = pending). Amounts subtracted from the assigned source's effective remaining.</div>
+      </div>
+      <div class="decision">
+        <div class="d-title"><span class="d-icon">&#x1F501;</span> Recurring templates</div>
+        <div class="d-body">Belong to household (not month). Each has <code>cadence</code> (<code>monthly</code> | <code>quarterly</code> | <code>yearly</code>), <code>active</code> flag, and <code>start_year_month</code>. On month creation, matching templates materialise as expense rows. Source matched by name.</div>
+      </div>
+    </div>
+
+    <h3>Schema Shape (from prototype)</h3>
+    <div class="code-block"><pre><span class="cm">// Expense: belongs to one half, one source, optional tag</span>
+{ id, name, category, half: <span class="str">"half1"</span>|<span class="str">"half2"</span>, amount, sourceId, tag, payments[] }
+
+<span class="cm">// Source: income for a specific half or both</span>
+{ id, name, type: <span class="str">"salary"</span>|<span class="str">"debt_collected"</span>|<span class="str">"savings_withdrawal"</span>,
+  accountLabel, half: <span class="str">"half1"</span>|<span class="str">"half2"</span>|<span class="str">"both"</span>, balance }
+
+<span class="cm">// Carry-over: deficit assigned to a source in the current month</span>
+{ id, from: <span class="str">"prev_month"</span>|<span class="str">"half1"</span>|<span class="str">"half2"</span>, fromLabel, amount, sourceId, resolvedAt }
+
+<span class="cm">// Tags (50/30/20 philosophy)</span>
+<span class="str">"needs"</span> | <span class="str">"wants"</span> | <span class="str">"savings"</span> | <span class="str">"investment"</span> | <span class="str">"business"</span>
+
+<span class="cm">// Categories</span>
+<span class="str">"Bills"</span> | <span class="str">"Food"</span> | <span class="str">"Utilities"</span> | <span class="str">"Home"</span> | <span class="str">"Travel"</span> | <span class="str">"Health"</span> | <span class="str">"Education"</span> | <span class="str">"Other"</span></pre></div>
+
+    <h3>Modules</h3>
+    <div class="mod-grid">
+      <div class="mod-card">
+        <div class="mod-name">auth</div>
+        <div class="mod-desc">Google OAuth sign-in/out, session hook, route guard</div>
+        <span class="mod-badge crud">AUTH</span>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name">household</div>
+        <div class="mod-desc">Household CRUD, member management, invite flow</div>
+        <span class="mod-badge crud">CRUD</span>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name">months</div>
+        <div class="mod-desc">Month CRUD, listing, template generation on create</div>
+        <span class="mod-badge crud">CRUD</span>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name">budget-engine</div>
+        <div class="mod-desc">Pure math: source remaining, expense totals/status, carry-over effective balances</div>
+        <span class="mod-badge pure">PURE</span>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name">sources</div>
+        <div class="mod-desc">Source CRUD per month, balance tracking</div>
+        <span class="mod-badge crud">CRUD</span>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name">expenses</div>
+        <div class="mod-desc">Expense + payment CRUD, tag assignment</div>
+        <span class="mod-badge crud">CRUD</span>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name">carry-overs</div>
+        <div class="mod-desc">Carry-over CRUD, resolve/resolve-all, deficit assignment</div>
+        <span class="mod-badge crud">CRUD</span>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name">recurring-templates</div>
+        <div class="mod-desc">Template CRUD, generate-into-month logic</div>
+        <span class="mod-badge crud">CRUD</span>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name">statistics</div>
+        <div class="mod-desc">Read-only aggregation functions (by-category, by-tag, by-half)</div>
+        <span class="mod-badge pure">PURE</span>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name">ui</div>
+        <div class="mod-desc">Shared presentational components (Modal, Button, Toast, Pill, StatusPill)</div>
+        <span class="mod-badge ui">UI</span>
+      </div>
+    </div>
+
+    <h3>Tech Stack</h3>
+    <div class="tech-table">
+      <div class="row head"><div class="cell">Layer</div><div class="cell">Choice</div><div class="cell">Notes</div></div>
+      <div class="row"><div class="cell"><span class="val">Runtime</span></div><div class="cell">Bun (LTS)</div><div class="cell">Package manager + dev runtime</div></div>
+      <div class="row"><div class="cell"><span class="val">Build</span></div><div class="cell">Vite</div><div class="cell">Already in prototype, compatible with Bun</div></div>
+      <div class="row"><div class="cell"><span class="val">Frontend</span></div><div class="cell">React 18 + TypeScript</div><div class="cell">Migrated from prototype's plain JS</div></div>
+      <div class="row"><div class="cell"><span class="val">Styling</span></div><div class="cell">Tailwind CSS</div><div class="cell">Custom theme mirrors prototype's palette</div></div>
+      <div class="row"><div class="cell"><span class="val">Backend</span></div><div class="cell">Supabase</div><div class="cell">Postgres + Auth + JS client, free tier</div></div>
+      <div class="row"><div class="cell"><span class="val">Auth</span></div><div class="cell">Google OAuth</div><div class="cell">Via Supabase, one-click sign-in</div></div>
+      <div class="row"><div class="cell"><span class="val">Hosting</span></div><div class="cell">Vercel</div><div class="cell">Free, auto-deploy from GitHub</div></div>
+      <div class="row"><div class="cell"><span class="val">Types</span></div><div class="cell">supabase gen types</div><div class="cell">Auto-generate DB types from schema</div></div>
+    </div>
+
+    <h3>Routing</h3>
+    <div class="code-block"><pre><span class="str">/sign-in</span>
+<span class="str">/setup</span>                                    <span class="cm">// first-run household creation</span>
+<span class="str">/month/:year-:month/overview</span>
+<span class="str">/month/:year-:month/half/:half</span>
+<span class="str">/month/:year-:month/half/:half/category/:cat</span>
+<span class="str">/recurring</span>
+<span class="str">/statistics</span></pre></div>
+
+    <h3>Currency</h3>
+    <div class="decisions">
+      <div class="decision">
+        <div class="d-body">All amounts in Philippine Peso. Single currency, no multi-currency support. Formatted as <code>&#x20B1; XX,XXX.XX</code> using <code>toLocaleString("en-PH")</code>.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 05 TESTING ============ -->
+  <section id="testing">
+    <div class="sec-head"><span class="num">05</span><h2>Testing Decisions</h2></div>
+    <p class="sec-intro">
+      Tests verify external behaviour through each module's public interface, not implementation details.
+      A test should break only when the module's contract changes. All 10 modules are tested. Framework: Vitest + React Testing Library.
+    </p>
+
+    <div class="test-table">
+      <div class="row head"><div class="cell">Module</div><div class="cell">Test Type</div><div class="cell">Key Scenarios</div></div>
+      <div class="row">
+        <div class="cell"><span class="val">budget-engine</span></div>
+        <div class="cell"><span class="test-badge unit">Unit</span></div>
+        <div class="cell">Source remaining with multiple cross-expense payments; expense status transitions (unpaid &rarr; partial &rarr; paid &rarr; overpaid); carry-over deduction from effective balance; zero-balance sources</div>
+      </div>
+      <div class="row">
+        <div class="cell"><span class="val">statistics</span></div>
+        <div class="cell"><span class="test-badge unit">Unit</span></div>
+        <div class="cell">Category/tag percentage rounding (must sum to 100%); empty month &rarr; zero totals; single-category month; expenses with no tags</div>
+      </div>
+      <div class="row">
+        <div class="cell"><span class="val">recurring-templates</span></div>
+        <div class="cell"><span class="test-badge unit">Unit</span></div>
+        <div class="cell">Monthly generates every month; quarterly on correct months; yearly once; inactive skipped; start_year_month respected; source name matching</div>
+      </div>
+      <div class="row">
+        <div class="cell"><span class="val">carry-overs</span></div>
+        <div class="cell"><span class="test-badge unit">Unit</span></div>
+        <div class="cell">Resolve single sets timestamp; resolve-all clears all pending; effective remaining subtracts unresolved; multi-source allocation sums</div>
+      </div>
+      <div class="row">
+        <div class="cell"><span class="val">expenses</span></div>
+        <div class="cell"><span class="test-badge integ">Integration</span></div>
+        <div class="cell">CRUD persists correctly; payment creation decrements source remaining; deleting payment restores balance; category filtering</div>
+      </div>
+      <div class="row">
+        <div class="cell"><span class="val">sources</span></div>
+        <div class="cell"><span class="test-badge integ">Integration</span></div>
+        <div class="cell">CRUD operations; half-filtering; balance display (never negative even if overpaid)</div>
+      </div>
+      <div class="row">
+        <div class="cell"><span class="val">months</span></div>
+        <div class="cell"><span class="test-badge integ">Integration</span></div>
+        <div class="cell">Create with template generation; unique constraint on duplicate; household-scoped listing</div>
+      </div>
+      <div class="row">
+        <div class="cell"><span class="val">auth</span></div>
+        <div class="cell"><span class="test-badge integ">Integration</span></div>
+        <div class="cell">Sign-in redirects; session persists; unauthenticated &rarr; sign-in redirect</div>
+      </div>
+      <div class="row">
+        <div class="cell"><span class="val">household</span></div>
+        <div class="cell"><span class="test-badge integ">Integration</span></div>
+        <div class="cell">Create household + member; invite acceptance; RLS prevents cross-household access</div>
+      </div>
+      <div class="row">
+        <div class="cell"><span class="val">ui</span></div>
+        <div class="cell"><span class="test-badge comp">Component</span></div>
+        <div class="cell">Modal opens/closes; Toast auto-dismisses; StatusPill renders correct variant per status</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 06 OUT OF SCOPE ============ -->
+  <section id="oos">
+    <div class="sec-head"><span class="num">06</span><h2>Out of Scope</h2></div>
+    <p class="sec-intro">Explicitly deferred from phase 1. Do not build.</p>
+    <div class="oos-grid">
+      <div class="oos-item"><span class="x">&#x2715;</span> Realtime sync between devices</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Mobile-responsive layouts / PWA</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Native iOS / Android apps</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Bill-due reminders / notifications</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Bank integrations (GCash, Maya, BDO)</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> CSV / spreadsheet import</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Multi-currency support</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Detailed audit history</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Role-based permissions</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Recurring source templates</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Auto-detect carry-over deficits</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Offline-first / local caching</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Multi-month trend reports</div>
+      <div class="oos-item"><span class="x">&#x2715;</span> Dark mode / theme customisation</div>
+    </div>
+  </section>
+
+  <!-- ============ 07 NOTES ============ -->
+  <section id="notes">
+    <div class="sec-head"><span class="num">07</span><h2>Further Notes</h2></div>
+    <div class="notes">
+      <div class="note">
+        <div class="note-title">Prototype reference</div>
+        <div class="note-body">The existing prototype at <code>family-budget/src/App.jsx</code> (~2,776 lines) serves as the definitive visual design spec. Match rendering pixel-for-pixel but restructure into the module/component hierarchy above.</div>
+      </div>
+      <div class="note">
+        <div class="note-title">Tailwind migration</div>
+        <div class="note-body">The prototype uses ~375 lines of handwritten CSS with CSS custom properties (<code>--linen</code>, <code>--ink</code>, <code>--green</code>, etc.). The Tailwind config must extend the theme to include these exact colour values. Side-by-side visual comparison against the running prototype during porting.</div>
+      </div>
+      <div class="note">
+        <div class="note-title">Seed data</div>
+        <div class="note-body">The prototype includes a rich seed month (May 2026) with 5 sources, 12 expenses, 2 carry-overs, and several payments. This should be reproducible via a development seed script.</div>
+      </div>
+      <div class="note">
+        <div class="note-title">Phase 2 prep</div>
+        <div class="note-body">All tables include <code>updated_at</code> columns from day one. The <code>budget-engine</code> module is kept as pure functions (no React dependency) so it can be reused in React Native in phase 3.</div>
+      </div>
+      <div class="note">
+        <div class="note-title">Weekly meeting workflow</div>
+        <div class="note-body">Primary use case: couple side-by-side weekly, one person driving. Performance under concurrent writes is not a phase 1 concern, but UX should feel snappy (optimistic UI updates where safe).</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span class="k">FamilyBudget v1 PRD</span>
+    <span>Generated 2026-05-27</span>
+  </footer>
+
+</div>
+</body>
+</html>
