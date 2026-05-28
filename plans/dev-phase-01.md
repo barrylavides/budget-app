@@ -7,6 +7,7 @@
 - [Infrastructure Model](#infrastructure-model)
 - [Agent Docker Setup](#agent-docker-setup)
 - [Convenience Script](#convenience-script)
+- [Issue #2 Execution — Problems & Solutions](#issue-2-execution--problems--solutions)
 - [Running Agents — Sequential Tickets](#running-agents--sequential-tickets)
 - [Running Agents — Parallel Tickets](#running-agents--parallel-tickets)
 - [Merging Parallel Branches](#merging-parallel-branches)
@@ -110,6 +111,7 @@ RUN apt-get update && apt-get install -y \
   git \
   curl \
   docker.io \
+  gosu \
   && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI
@@ -121,8 +123,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 
 # Supabase CLI
 RUN ARCH=$(dpkg --print-architecture) && \
-  VERSION=$(curl -s https://api.github.com/repos/supabase/cli/releases/latest | grep '"tag_name"' | cut -d'"' -f4 | sed 's/^v//') && \
-  curl -fsSL "https://github.com/supabase/cli/releases/latest/download/supabase_${VERSION}_linux_${ARCH}.deb" -o /tmp/supabase.deb && \
+  VERSION=$(curl -sL https://api.github.com/repos/supabase/cli/releases/latest | sed -n 's/.*"tag_name":"v\([^"]*\)".*/\1/p') && \
+  curl -fsSL "https://github.com/supabase/cli/releases/download/v${VERSION}/supabase_${VERSION}_linux_${ARCH}.deb" -o /tmp/supabase.deb && \
   dpkg -i /tmp/supabase.deb && \
   rm /tmp/supabase.deb
 
@@ -131,17 +133,31 @@ RUN bun install -g @anthropic-ai/claude-code \
   && CLAUDE_PKG=$(find /root -path "*/node_modules/@anthropic-ai/claude-code/install.cjs" 2>/dev/null | head -1) \
   && if [ -n "$CLAUDE_PKG" ]; then bun "$CLAUDE_PKG"; fi
 
+# Wrap supabase to always exclude studio on start (Studio bind-mounts fail in sibling containers)
+RUN mv /usr/bin/supabase /usr/bin/supabase-real \
+  && printf '#!/bin/bash\nif [ "$1" = "start" ]; then\n  shift\n  exec /usr/bin/supabase-real start --exclude studio "$@"\nfi\nexec /usr/bin/supabase-real "$@"\n' > /usr/bin/supabase \
+  && chmod +x /usr/bin/supabase
+
+# Make claude accessible to all users
+RUN chmod a+rx /root && chmod -R a+rX /root/.bun \
+  && CLAUDE_BIN=$(find /root/.bun -name "claude" -path "*/claude-code-linux-*/claude" ! -path "*musl*" | head -1) \
+  && ln -sf "$CLAUDE_BIN" /usr/local/bin/claude
+
 # Non-root user (Claude Code blocks --dangerously-skip-permissions as root)
 RUN useradd -m -s /bin/bash agent \
-  && usermod -aG docker agent \
   && mkdir -p /home/agent/app \
   && chown agent:agent /home/agent/app
 
-USER agent
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 WORKDIR /home/agent/app
 
+ENTRYPOINT ["entrypoint.sh"]
 CMD ["bash"]
 ```
+
+The entrypoint runs as root to `chmod 666` the Docker socket (the docker group trick doesn't work on Docker Desktop for Mac), then drops to the `agent` user via `gosu`.
 
 `docker.io` is needed so the Supabase CLI inside the container can talk to the Docker daemon via the mounted socket.
 
@@ -155,8 +171,10 @@ Issues hit during the first build and how they were resolved:
 | `npm: not found` when installing Claude Code | `oven/bun` image ships bun, not npm | Use `bun install -g` instead of `npm install -g` |
 | `claude native binary not installed` | `bun install -g` doesn't run postinstall scripts needed for the platform-native binary | Run `install.cjs` manually after `bun install -g`: find the file and execute with `bun` |
 | `failed to connect to postgres: dial tcp 127.0.0.1:54322: connection refused` | Supabase containers publish ports to the Docker VM's network; agent container has its own network namespace | Add `--network host` to `docker run` so agent shares the VM's network |
-| `--dangerously-skip-permissions cannot be used with root/sudo privileges` | Container runs as root by default; Claude Code blocks skip-permissions for root | Add non-root `agent` user to Dockerfile with docker group access |
-| `mounts denied: /app/supabase/snippets is not shared from the host` | Supabase Studio bind-mounts a container-internal path into a sibling container; Docker Desktop can't see it | Use `supabase start --exclude studio` (agent doesn't need the UI) |
+| `--dangerously-skip-permissions cannot be used with root/sudo privileges` | Container runs as root by default; Claude Code blocks skip-permissions for root | Add non-root `agent` user; entrypoint drops to it via `gosu` |
+| `permission denied` on Docker socket as non-root | Docker Desktop for Mac doesn't use a `docker` group; socket is owned by root | Entrypoint runs as root, `chmod 666` the socket, then `gosu agent` |
+| `claude: command not found` as non-root | `bun install -g` puts binaries in `/root/.bun/bin/`, not on the `agent` user's PATH | Symlink `claude` and `bun` to `/usr/local/bin/` |
+| `mounts denied: /app/supabase/snippets is not shared from the host` | Supabase Studio bind-mounts a container-internal path into a sibling container; Docker Desktop can't see it | Wrap `supabase` binary so `start` always injects `--exclude studio` (can't rely on the LLM to remember the flag) |
 | `Claude configuration file not found at: /root/.claude.json` | `.claude.json` lives at home root, not inside `.claude/`; wasn't being mounted | Mount `$HOME/.claude.json` into the container alongside `$HOME/.claude/` |
 | 404 downloading Supabase `.deb` | Release asset filename includes the version number (e.g. `supabase_2.101.0_linux_arm64.deb`), not a generic `supabase_linux_arm64.deb` | Fetch version from GitHub API first, then build the URL dynamically |
 
@@ -204,6 +222,32 @@ The first layer (in-session resilience) handles 90% of transient errors without 
 # With effort override
 ./run-ticket.sh 3 month-sidebar haiku low
 ```
+
+---
+
+## Issue #2 Execution — Problems & Solutions
+
+Getting the first ticket (#2 — scaffold) to complete its full acceptance criteria surfaced a string of issues across authentication, persistence, agent behavior, and verification. Each was fixed in `run-ticket.sh`, the prompt, or the Dockerfile. Recorded here so later tickets don't re-hit them.
+
+| # | Problem | Symptom | Root cause | Solution |
+|---|---------|---------|-----------|----------|
+| 1 | Agent not authenticated | `Not logged in · Please run /login` on every attempt | Container only received `ANTHROPIC_API_KEY`, but the host authenticates via OAuth (`CLAUDE_CODE_OAUTH_TOKEN`) | Pass `-e CLAUDE_CODE_OAUTH_TOKEN` to `docker run` alongside the API key |
+| 2 | Work vanished after run | Agent reported success, but no branch/commits existed anywhere | `--rm` container discarded its filesystem on exit; the in-container clone (and its commits) went with it | Mount a persistent host workspace `workspaces/ticket-<N>` into the container; reuse it on retries instead of re-cloning |
+| 3 | Agent never pushed | Output ended with "Approve this commit message?" then stopped | Agent treated the headless run as interactive and waited for confirmation | Added **CRITICAL RULES** to the prompt (non-interactive — commit directly, push immediately, never ask) **and** a host-side commit+push fallback after the run |
+| 4 | Risk of pushing broken work | — | Host-side fallback pushed regardless of outcome | Moved the commit/push fallback inside the `EXIT_CODE == 0` (success-only) branch |
+| 5 | Bare scaffold, ACs unmet | App showed unstyled "Loading…"; no theme, shell, routes, seed, or engine | Prompt said only "implement using /tdd"; agent ran `create vite` and called it done | Rewrote prompt with a **quality bar**: read every acceptance-criteria checkbox, implement them one by one, self-check the full list before committing |
+| 6 | App built but didn't render | Unit tests passed, but browser threw `Failed to resolve import "@/components/layout/Shell"` | Unit tests never exercised the real Vite build / import resolution | Added a **Playwright smoke-test** step: start the dev server, load the app, assert no console errors and that key elements render — fixes import/build failures before commit |
+| 7 | Playwright unusable in container | `playwright install --with-deps` needs `apt` (root); browser cache landed in `/root` unreadable by the `agent` user | Container drops to non-root `agent`; per-user browser cache isn't shared | Install Chromium + system deps in the **Dockerfile** as root; set `PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers` (world-readable); tell the agent **not** to run `playwright install` |
+| 8 | Push rejected | `! [rejected] feat/scaffold -> feat/scaffold (non-fast-forward)`; agent misreported it as "OAuth token invalid" | Each run regenerates the branch with fresh history; a stale `feat/scaffold` from a prior run had diverged | Host-side fallback push uses `--force-with-lease` (each run is a complete reimplementation on a dedicated branch) |
+| 9 | Wrong "run locally" hint | `cd: no such file or directory: app` | Script hardcoded `cd app`, but the agent scaffolds into `family-budget/` | Auto-detect the app dir by finding the nearest `package.json` (excluding `node_modules`) |
+
+### Script enhancements that came out of this
+
+- **Persistent workspaces** — each ticket clones into `workspaces/ticket-<N>/` on the host (gitignored), surviving container teardown and reused across retries.
+- **Live logs + live timer** — docker output streams in real time, every line prefixed with `[HH:MM:SS]` elapsed; a background heartbeat ticks the timer every 10s during idle (agent-thinking) stretches.
+- **Clear attempt framing** — each attempt is wrapped in divider blocks with start time, and a pass/fail footer showing per-attempt and total elapsed time.
+- **Success-only commit/push** — host-side safety net commits any leftover changes and force-pushes the branch, but only when the agent exits 0.
+- **Run-locally hint** — on success, prints the exact `cd <detected-app-dir> && bun install && bun run dev` to launch the result.
 
 ---
 
