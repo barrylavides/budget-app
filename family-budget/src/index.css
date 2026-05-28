@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* Linen palette */
+  --color-linen: #fafaf7;
+  --color-linen-2: #f3f2ec;
+  --color-linen-3: #eae9e1;
+  --color-linen-4: #dddbd0;
+
+  /* Ink palette */
+  --color-ink: #0e0e0b;
+  --color-ink-2: #2a2a25;
+  --color-ink-3: #5a5a52;
+  --color-ink-4: #9a9a8e;
+  --color-ink-5: #c8c8bc;
+
+  /* Rule */
+  --color-rule: #e2e1d8;
+
+  /* Green palette */
+  --color-green: #16a34a;
+  --color-green-bg: #f0fdf4;
+  --color-green-rule: #bbf7d0;
+
+  /* Red palette */
+  --color-red: #dc2626;
+  --color-red-bg: #fef2f2;
+  --color-red-rule: #fecaca;
+
+  /* Amber palette */
+  --color-amber: #b45309;
+  --color-amber-bg: #fffbeb;
+  --color-amber-rule: #fde68a;
+
+  /* Blue palette */
+  --color-blue: #1d4ed8;
+  --color-blue-bg: #eff6ff;
+  --color-blue-rule: #bfdbfe;
+
+  /* Fonts */
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'DM Mono', 'Courier New', monospace;
+
+  /* Layout vars */
+  --sidebar-w: 230px;
+  --sidebar-collapsed-w: 56px;
+  --topbar-h: 57px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: #e8e7e0;
+  min-height: 100vh;
+}
