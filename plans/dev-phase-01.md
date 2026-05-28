@@ -6,6 +6,7 @@
 - [Ticket Execution Order](#ticket-execution-order)
 - [Infrastructure Model](#infrastructure-model)
 - [Agent Docker Setup](#agent-docker-setup)
+- [Convenience Script](#convenience-script)
 - [Running Agents — Sequential Tickets](#running-agents--sequential-tickets)
 - [Running Agents — Parallel Tickets](#running-agents--parallel-tickets)
 - [Merging Parallel Branches](#merging-parallel-branches)
@@ -30,21 +31,25 @@ No Supabase CLI on the host — it runs inside a Docker container with the Docke
 
 ```
 Phase 1 — Foundation (sequential, one at a time)
-  #2  Project scaffold + local Supabase + schema    [HITL — needs Docker]
-  #3  Month sidebar + create month
-  #4  Sources panel with balance tracking
-  #5  Expenses + category views
+  #2  Project scaffold + local Supabase + schema    [HITL] [sonnet]
+  #3  Month sidebar + create month                          [haiku]
+  #4  Sources panel with balance tracking                   [haiku]
+  #5  Expenses + category views                             [haiku]
 
 Phase 2 — Features (parallel — 3 agents simultaneously)
-  #6  Half views + overview dashboard               [branch: feat/half-views]
-  #7  Payments + status tracking                    [branch: feat/payments]
-  #8  Recurring expense templates                   [branch: feat/recurring]
+  #6  Half views + overview dashboard               [feat/half-views]  [sonnet]
+  #7  Payments + status tracking                    [feat/payments]    [sonnet]
+  #8  Recurring expense templates                   [feat/recurring]   [haiku]
 
 Phase 3 — Finish (sequential)
-  #9  Statistics view                               [after #7 merges]
-  #10 Polish + general UX                           [after #6-#9 merge]
-  #11 Auth + Cloud Supabase + Vercel deploy         [HITL — needs Google Console]
+  #9  Statistics view                               [after #7 merges]  [haiku]
+  #10 Polish + general UX                           [after #6-#9]      [sonnet]
+  #11 Auth + Cloud Supabase + Vercel deploy         [HITL]             [sonnet]
 ```
+
+**Model key:**
+- `[sonnet]` = `claude-sonnet-4-6` — complex scaffolding, multi-component features, cross-cutting changes, infra/auth
+- `[haiku]` = `claude-haiku-4-5-20251001` — single-feature CRUD where patterns are already established by earlier tickets
 
 ---
 
@@ -149,65 +154,9 @@ docker build -t budget-agent .
 
 ---
 
-## Running Agents — Sequential Tickets
+## Convenience Script
 
-Each sequential ticket follows this cycle: launch agent → agent starts Supabase + implements ticket → tear down → repeat.
-
-### Step 1 — Run the agent
-
-```bash
-docker run --rm -it \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $HOME/.claude:/root/.claude \
-  -v $HOME/.config/gh:/root/.config/gh \
-  budget-agent \
-  bash -c "git clone https://github.com/barrylavides/budget-app.git . && claude -p \"$(cat <<'PROMPT'
-You are implementing a ticket for the FamilyBudget app.
-
-1. Run `supabase start` in the project root to start the local Supabase instance
-2. Note the anon key and API URL from the output
-3. Read the issue: gh issue view <ISSUE_NUMBER> --repo barrylavides/budget-app
-4. Read CLAUDE.md for project conventions
-5. Read the PRD: gh issue view 1 --repo barrylavides/budget-app
-6. Create and switch to branch: feat/<branch-name>
-7. Implement using /tdd (red-green-refactor loop)
-8. Use the API URL and anon key from step 2 for Supabase connections
-9. Run all tests: bun run test
-10. Commit and push when all tests pass
-11. Run `supabase stop` to shut down the local instance
-
-Branch: feat/<branch-name>
-Issue: #<ISSUE_NUMBER>
-PROMPT
-)\" --dangerously-skip-permissions"
-```
-
-This is a single command. The agent container has the Supabase CLI and Docker CLI installed, and the host's Docker socket is mounted (`-v /var/run/docker.sock:/var/run/docker.sock`). When the agent runs `supabase start`, the CLI talks to Docker Desktop through that socket, which creates the Supabase containers (Postgres, API, Studio) as siblings — not nested inside the agent container:
-
-```
-Docker Desktop (host)
-├── agent container        ← you started this
-│   └── supabase start     ← talks to socket
-├── supabase-db            ← Docker Desktop created these
-├── supabase-api              because the socket request
-├── supabase-studio           came through
-```
-
-### Step 2 — Merge on host, repeat
-
-```bash
-cd /Users/barry/Documents/projects/budget-app
-git fetch origin
-git merge origin/feat/<branch-name>
-bun run test  # verify locally if you want
-git push origin main
-```
-
-Then start from Step 1 for the next ticket.
-
-### Convenience script
-
-Save as `run-ticket.sh` in the project root:
+Save as `run-ticket.sh` in the project root (or run `chmod +x run-ticket.sh` if already created):
 
 ```bash
 #!/bin/bash
@@ -215,15 +164,24 @@ set -euo pipefail
 
 ISSUE=$1
 BRANCH=$2
+MODEL_SHORT=${3:-sonnet}  # default to sonnet if not specified
 REPO="barrylavides/budget-app"
 
-echo "=== Launching agent for ticket #${ISSUE} on branch feat/${BRANCH} ==="
+# Map short names to full model IDs
+case "$MODEL_SHORT" in
+  haiku)  MODEL_ID="claude-haiku-4-5-20251001" ;;
+  sonnet) MODEL_ID="claude-sonnet-4-6" ;;
+  opus)   MODEL_ID="claude-opus-4-6" ;;
+  *)      MODEL_ID="$MODEL_SHORT" ;;  # allow passing full ID directly
+esac
+
+echo "=== Ticket #${ISSUE} | branch: feat/${BRANCH} | model: ${MODEL_ID} ==="
 docker run --rm -it \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v $HOME/.claude:/root/.claude \
   -v $HOME/.config/gh:/root/.config/gh \
   budget-agent \
-  bash -c "git clone https://github.com/${REPO}.git . && claude -p \"$(cat <<PROMPT
+  bash -c "git clone https://github.com/${REPO}.git . && claude --model ${MODEL_ID} -p \"$(cat <<PROMPT
 You are implementing a ticket for the FamilyBudget app.
 
 1. Run \`supabase start\` in the project root to start the local Supabase instance
@@ -249,13 +207,86 @@ echo "=== Done. Merge feat/${BRANCH} into main when ready. ==="
 Usage:
 
 ```bash
-chmod +x run-ticket.sh
+# Phase 1 — sequential
+./run-ticket.sh 2 scaffold sonnet
+./run-ticket.sh 3 month-sidebar haiku
+./run-ticket.sh 4 sources-panel haiku
+./run-ticket.sh 5 expenses haiku
 
-# Sequential tickets
-./run-ticket.sh 3 month-sidebar
-./run-ticket.sh 4 sources-panel
-./run-ticket.sh 5 expenses
+# Phase 2 — parallel (3 terminals)
+./run-ticket.sh 6 half-views sonnet
+./run-ticket.sh 7 payments sonnet
+./run-ticket.sh 8 recurring haiku
 ```
+
+---
+
+## Running Agents — Sequential Tickets
+
+Each sequential ticket follows this cycle: launch agent → agent starts Supabase + implements ticket → tear down → repeat.
+
+### Step 1 — Run the agent
+
+**Option A — Convenience script** (recommended):
+
+```bash
+./run-ticket.sh <issue#> <branch-name> <model>
+# Example: ./run-ticket.sh 2 scaffold sonnet
+```
+
+See the model key in [Ticket Execution Order](#ticket-execution-order) for each ticket's recommended model.
+
+**Option B — Manual docker run**:
+
+```bash
+docker run --rm -it \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v $HOME/.claude:/root/.claude \
+  -v $HOME/.config/gh:/root/.config/gh \
+  budget-agent \
+  bash -c "git clone https://github.com/barrylavides/budget-app.git . && claude --model <MODEL_ID> -p \"$(cat <<'PROMPT'
+You are implementing a ticket for the FamilyBudget app.
+
+1. Run `supabase start` in the project root to start the local Supabase instance
+2. Note the anon key and API URL from the output
+3. Read the issue: gh issue view <ISSUE_NUMBER> --repo barrylavides/budget-app
+4. Read CLAUDE.md for project conventions
+5. Read the PRD: gh issue view 1 --repo barrylavides/budget-app
+6. Create and switch to branch: feat/<branch-name>
+7. Implement using /tdd (red-green-refactor loop)
+8. Use the API URL and anon key from step 2 for Supabase connections
+9. Run all tests: bun run test
+10. Commit and push when all tests pass
+11. Run `supabase stop` to shut down the local instance
+
+Branch: feat/<branch-name>
+Issue: #<ISSUE_NUMBER>
+PROMPT
+)\" --dangerously-skip-permissions"
+```
+
+The agent container has the Supabase CLI and Docker CLI installed, and the host's Docker socket is mounted (`-v /var/run/docker.sock:/var/run/docker.sock`). When the agent runs `supabase start`, the CLI talks to Docker Desktop through that socket, which creates the Supabase containers (Postgres, API, Studio) as siblings — not nested inside the agent container:
+
+```
+Docker Desktop (host)
+├── agent container        ← you started this
+│   └── supabase start     ← talks to socket
+├── supabase-db            ← Docker Desktop created these
+├── supabase-api              because the socket request
+├── supabase-studio           came through
+```
+
+### Step 2 — Merge on host, repeat
+
+```bash
+cd /Users/barry/Documents/projects/budget-app
+git fetch origin
+git merge origin/feat/<branch-name>
+bun run test  # verify locally if you want
+git push origin main
+```
+
+Then start from Step 1 for the next ticket.
 
 ---
 
@@ -265,18 +296,7 @@ After ticket #5 is merged to `main`, run all 3 in separate terminals. Each gets 
 
 ### Launch 3 agents (3 terminals)
 
-Each agent starts its own Supabase instance, implements the ticket, and shuts Supabase down. Just run the convenience script with port overrides so the 3 instances don't collide:
-
-```bash
-# Terminal 1 — Half views (#6)
-./run-ticket.sh 6 half-views
-
-# Terminal 2 — Payments (#7)
-./run-ticket.sh 7 payments
-
-# Terminal 3 — Recurring templates (#8)
-./run-ticket.sh 8 recurring
-```
+Each agent starts its own Supabase instance, implements the ticket, and shuts Supabase down. Run the convenience script in 3 separate terminals — see [Convenience Script](#convenience-script) for the commands.
 
 Each agent's `supabase start` will allocate its own ports automatically since they run in separate cloned repos inside separate containers.
 
