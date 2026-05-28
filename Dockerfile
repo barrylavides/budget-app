@@ -25,6 +25,13 @@ RUN bun install -g @anthropic-ai/claude-code \
   && CLAUDE_PKG=$(find /root -path "*/node_modules/@anthropic-ai/claude-code/install.cjs" 2>/dev/null | head -1) \
   && if [ -n "$CLAUDE_PKG" ]; then bun "$CLAUDE_PKG"; fi
 
-WORKDIR /app
+# Non-root user (Claude Code blocks --dangerously-skip-permissions as root)
+RUN useradd -m -s /bin/bash agent \
+  && usermod -aG docker agent \
+  && mkdir -p /home/agent/app \
+  && chown agent:agent /home/agent/app
+
+USER agent
+WORKDIR /home/agent/app
 
 CMD ["bash"]

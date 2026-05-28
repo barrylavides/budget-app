@@ -7,6 +7,11 @@ MODEL_SHORT=${3:-sonnet}
 EFFORT=${4:-}
 REPO="barrylavides/budget-app"
 MAX_RETRIES=3
+LOG_DIR="$(cd "$(dirname "$0")" && pwd)/logs"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+LOG_FILE="${LOG_DIR}/ticket-${ISSUE}-${TIMESTAMP}.log"
+
+mkdir -p "$LOG_DIR"
 
 case "$MODEL_SHORT" in
   haiku)  MODEL_ID="claude-haiku-4-5-20251001" ;;
@@ -20,10 +25,12 @@ if [ -n "$EFFORT" ]; then
   EFFORT_FLAG="--effort ${EFFORT}"
 fi
 
+AGENT_HOME="/home/agent"
+
 PROMPT_BASE="$(cat <<PROMPT
 You are implementing a ticket for the FamilyBudget app.
 
-1. Run \`supabase start\` in the project root to start the local Supabase instance
+1. Run \`supabase start --exclude studio\` in the project root to start the local Supabase instance
 2. Note the anon key and API URL from the output
 3. Read the issue: gh issue view ${ISSUE} --repo ${REPO}
 4. Read CLAUDE.md for project conventions
@@ -80,8 +87,9 @@ RETRY
   LAST_OUTPUT=$(docker run --rm -i \
     --network host \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v $HOME/.claude:/root/.claude \
-    -v $HOME/.config/gh:/root/.config/gh \
+    -v $HOME/.claude:${AGENT_HOME}/.claude \
+    -v $HOME/.claude.json:${AGENT_HOME}/.claude.json \
+    -v $HOME/.config/gh:${AGENT_HOME}/.config/gh \
     budget-agent \
     bash -c "git clone https://github.com/${REPO}.git . && claude --model ${MODEL_ID} ${EFFORT_FLAG} -p \"${FULL_PROMPT}\" --dangerously-skip-permissions" 2>&1)
   EXIT_CODE=$?
@@ -94,10 +102,16 @@ RETRY
     exit 0
   fi
 
+  echo "--- Attempt ${ATTEMPT} (exit code ${EXIT_CODE}) ---" >> "$LOG_FILE"
+  echo "$LAST_OUTPUT" | grep -iE \
+    "error|fail|denied|refused|fatal|warn|panic|not found|not installed|permission|timeout|cannot|unable|crashed|killed|SIGTERM|SIGKILL|exit code|mounts denied|connection refused" \
+    >> "$LOG_FILE"
+  echo "" >> "$LOG_FILE"
+
   if [ $ATTEMPT -lt $MAX_RETRIES ]; then
     echo "=== Attempt ${ATTEMPT} failed (exit code ${EXIT_CODE}). Retrying... ==="
   fi
 done
 
-echo "=== All ${MAX_RETRIES} attempts failed for ticket #${ISSUE}. Review the output above. ==="
+echo "=== All ${MAX_RETRIES} attempts failed for ticket #${ISSUE}. Logs saved to: ${LOG_FILE} ==="
 exit 1

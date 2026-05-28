@@ -131,7 +131,14 @@ RUN bun install -g @anthropic-ai/claude-code \
   && CLAUDE_PKG=$(find /root -path "*/node_modules/@anthropic-ai/claude-code/install.cjs" 2>/dev/null | head -1) \
   && if [ -n "$CLAUDE_PKG" ]; then bun "$CLAUDE_PKG"; fi
 
-WORKDIR /app
+# Non-root user (Claude Code blocks --dangerously-skip-permissions as root)
+RUN useradd -m -s /bin/bash agent \
+  && usermod -aG docker agent \
+  && mkdir -p /home/agent/app \
+  && chown agent:agent /home/agent/app
+
+USER agent
+WORKDIR /home/agent/app
 
 CMD ["bash"]
 ```
@@ -148,6 +155,9 @@ Issues hit during the first build and how they were resolved:
 | `npm: not found` when installing Claude Code | `oven/bun` image ships bun, not npm | Use `bun install -g` instead of `npm install -g` |
 | `claude native binary not installed` | `bun install -g` doesn't run postinstall scripts needed for the platform-native binary | Run `install.cjs` manually after `bun install -g`: find the file and execute with `bun` |
 | `failed to connect to postgres: dial tcp 127.0.0.1:54322: connection refused` | Supabase containers publish ports to the Docker VM's network; agent container has its own network namespace | Add `--network host` to `docker run` so agent shares the VM's network |
+| `--dangerously-skip-permissions cannot be used with root/sudo privileges` | Container runs as root by default; Claude Code blocks skip-permissions for root | Add non-root `agent` user to Dockerfile with docker group access |
+| `mounts denied: /app/supabase/snippets is not shared from the host` | Supabase Studio bind-mounts a container-internal path into a sibling container; Docker Desktop can't see it | Use `supabase start --exclude studio` (agent doesn't need the UI) |
+| `Claude configuration file not found at: /root/.claude.json` | `.claude.json` lives at home root, not inside `.claude/`; wasn't being mounted | Mount `$HOME/.claude.json` into the container alongside `$HOME/.claude/` |
 | 404 downloading Supabase `.deb` | Release asset filename includes the version number (e.g. `supabase_2.101.0_linux_arm64.deb`), not a generic `supabase_linux_arm64.deb` | Fetch version from GitHub API first, then build the URL dynamically |
 
 ### Build the image (one time)
@@ -218,13 +228,14 @@ See the model key in [Ticket Execution Order](#ticket-execution-order) for each 
 docker run --rm -it \
   --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $HOME/.claude:/root/.claude \
-  -v $HOME/.config/gh:/root/.config/gh \
+  -v $HOME/.claude:/home/agent/.claude \
+  -v $HOME/.claude.json:/home/agent/.claude.json \
+  -v $HOME/.config/gh:/home/agent/.config/gh \
   budget-agent \
   bash -c "git clone https://github.com/barrylavides/budget-app.git . && claude --model <MODEL_ID> -p \"$(cat <<'PROMPT'
 You are implementing a ticket for the FamilyBudget app.
 
-1. Run `supabase start` in the project root to start the local Supabase instance
+1. Run `supabase start --exclude studio` in the project root to start the local Supabase instance
 2. Note the anon key and API URL from the output
 3. Read the issue: gh issue view <ISSUE_NUMBER> --repo barrylavides/budget-app
 4. Read CLAUDE.md for project conventions
