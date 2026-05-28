@@ -20,8 +20,10 @@ RUN ARCH=$(dpkg --print-architecture) && \
   dpkg -i /tmp/supabase.deb && \
   rm /tmp/supabase.deb
 
-# Claude Code
-RUN bun install -g @anthropic-ai/claude-code
+# Claude Code (global install + manual postinstall for native binary)
+RUN bun install -g @anthropic-ai/claude-code \
+  && CLAUDE_PKG=$(find /root -path "*/node_modules/@anthropic-ai/claude-code/install.cjs" 2>/dev/null | head -1) \
+  && if [ -n "$CLAUDE_PKG" ]; then bun "$CLAUDE_PKG"; fi
 
 WORKDIR /app
 

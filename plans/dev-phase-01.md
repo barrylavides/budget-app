@@ -126,8 +126,10 @@ RUN ARCH=$(dpkg --print-architecture) && \
   dpkg -i /tmp/supabase.deb && \
   rm /tmp/supabase.deb
 
-# Claude Code
-RUN bun install -g @anthropic-ai/claude-code
+# Claude Code (global install + manual postinstall for native binary)
+RUN bun install -g @anthropic-ai/claude-code \
+  && CLAUDE_PKG=$(find /root -path "*/node_modules/@anthropic-ai/claude-code/install.cjs" 2>/dev/null | head -1) \
+  && if [ -n "$CLAUDE_PKG" ]; then bun "$CLAUDE_PKG"; fi
 
 WORKDIR /app
 
@@ -144,6 +146,8 @@ Issues hit during the first build and how they were resolved:
 |---------|-------|-----|
 | `gpg: not found` when installing Supabase CLI via apt repo | `oven/bun` image doesn't include `gpg`, and `deb.supabase.com` doesn't resolve | Install via GitHub release `.deb` instead of apt repo |
 | `npm: not found` when installing Claude Code | `oven/bun` image ships bun, not npm | Use `bun install -g` instead of `npm install -g` |
+| `claude native binary not installed` | `bun install -g` doesn't run postinstall scripts needed for the platform-native binary | Run `install.cjs` manually after `bun install -g`: find the file and execute with `bun` |
+| `failed to connect to postgres: dial tcp 127.0.0.1:54322: connection refused` | Supabase containers publish ports to the Docker VM's network; agent container has its own network namespace | Add `--network host` to `docker run` so agent shares the VM's network |
 | 404 downloading Supabase `.deb` | Release asset filename includes the version number (e.g. `supabase_2.101.0_linux_arm64.deb`), not a generic `supabase_linux_arm64.deb` | Fetch version from GitHub API first, then build the URL dynamically |
 
 ### Build the image (one time)
@@ -156,57 +160,26 @@ docker build -t budget-agent .
 
 ## Convenience Script
 
-Save as `run-ticket.sh` in the project root (or run `chmod +x run-ticket.sh` if already created):
+`run-ticket.sh` in the project root. Two layers of error recovery:
+
+1. **In-session resilience** — the prompt tells the agent to diagnose and retry failed commands (up to 3 times per command) instead of giving up on the first error
+2. **Capped retry wrapper** — if the `claude` process itself crashes, the script restarts it (max 3 attempts), passing the last 80 lines of output so the next attempt can diagnose and continue where the previous one left off
+
+### Why not Ralph Wiggum?
+
+The [Ralph Wiggum technique](https://ghuntley.com/ralph/) runs the agent in an infinite loop — if it fails, feed the error back and retry forever. We use a capped variant instead because:
+
+- **Fresh context per retry** — each restart is a new `claude -p` invocation with no memory of prior work. An infinite loop can redo or undo completed work on every iteration.
+- **Token cost** — each retry pays for a full clone + prompt. Uncapped retries can burn through budget on a fundamentally broken environment (bad Dockerfile, missing credentials).
+- **Unfixable errors exist** — wrong architecture, expired tokens, Docker daemon down. An infinite loop spins forever; a capped loop fails fast and tells you to look.
+
+The first layer (in-session resilience) handles 90% of transient errors without any retry cost. The second layer (capped at 3) catches the remaining cases where the process itself dies.
+
+### Usage
 
 ```bash
-#!/bin/bash
-set -euo pipefail
+./run-ticket.sh <issue#> <branch-name> <model> [effort]
 
-ISSUE=$1
-BRANCH=$2
-MODEL_SHORT=${3:-sonnet}  # default to sonnet if not specified
-REPO="barrylavides/budget-app"
-
-# Map short names to full model IDs
-case "$MODEL_SHORT" in
-  haiku)  MODEL_ID="claude-haiku-4-5-20251001" ;;
-  sonnet) MODEL_ID="claude-sonnet-4-6" ;;
-  opus)   MODEL_ID="claude-opus-4-6" ;;
-  *)      MODEL_ID="$MODEL_SHORT" ;;  # allow passing full ID directly
-esac
-
-echo "=== Ticket #${ISSUE} | branch: feat/${BRANCH} | model: ${MODEL_ID} ==="
-docker run --rm -it \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $HOME/.claude:/root/.claude \
-  -v $HOME/.config/gh:/root/.config/gh \
-  budget-agent \
-  bash -c "git clone https://github.com/${REPO}.git . && claude --model ${MODEL_ID} -p \"$(cat <<PROMPT
-You are implementing a ticket for the FamilyBudget app.
-
-1. Run \`supabase start\` in the project root to start the local Supabase instance
-2. Note the anon key and API URL from the output
-3. Read the issue: gh issue view ${ISSUE} --repo ${REPO}
-4. Read CLAUDE.md for project conventions
-5. Read the PRD: gh issue view 1 --repo ${REPO}
-6. Create and switch to branch: feat/${BRANCH}
-7. Implement using /tdd (red-green-refactor loop)
-8. Use the API URL and anon key from step 2 for Supabase connections
-9. Run all tests: bun run test
-10. Commit and push when all tests pass
-11. Run \`supabase stop\` to shut down the local instance
-
-Branch: feat/${BRANCH}
-Issue: #${ISSUE}
-PROMPT
-)\" --dangerously-skip-permissions"
-
-echo "=== Done. Merge feat/${BRANCH} into main when ready. ==="
-```
-
-Usage:
-
-```bash
 # Phase 1 — sequential
 ./run-ticket.sh 2 scaffold sonnet
 ./run-ticket.sh 3 month-sidebar haiku
@@ -217,6 +190,9 @@ Usage:
 ./run-ticket.sh 6 half-views sonnet
 ./run-ticket.sh 7 payments sonnet
 ./run-ticket.sh 8 recurring haiku
+
+# With effort override
+./run-ticket.sh 3 month-sidebar haiku low
 ```
 
 ---
@@ -240,6 +216,7 @@ See the model key in [Ticket Execution Order](#ticket-execution-order) for each 
 
 ```bash
 docker run --rm -it \
+  --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v $HOME/.claude:/root/.claude \
   -v $HOME/.config/gh:/root/.config/gh \
