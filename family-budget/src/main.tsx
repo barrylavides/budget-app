@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { ensureDevSession } from "./lib/devAuth";
+import { ToastProvider } from "./components/ui/Toast";
 import "./index.css";
 
 // DEV-only: sign in the seeded dev user before first render so RLS-gated
@@ -11,7 +12,9 @@ ensureDevSession().finally(() => {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <BrowserRouter>
-        <App />
+        <ToastProvider>
+          <App />
+        </ToastProvider>
       </BrowserRouter>
     </React.StrictMode>
   );
