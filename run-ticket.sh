@@ -325,6 +325,44 @@ verify_and_close() {
   print_run_locally "$app_dir"
 }
 
+# Print the routes THIS branch added, as clickable localhost URLs. Pulled from
+# the diff of React Router <Route path="..."> defs against main, so it works for
+# any ticket without hardcoding. The seeded month fills :yearMonth; any other
+# :param is flagged since we can't know its value. Lets you reach a feature even
+# when the ticket shipped the route but no sidebar/tab link to it.
+print_new_routes() {
+  local app_dir=$1
+  command -v git >/dev/null 2>&1 || return 0
+  local base
+  base=$(git -C "$app_dir" rev-parse --verify -q origin/main 2>/dev/null) \
+    || base=$(git -C "$app_dir" rev-parse --verify -q main 2>/dev/null) \
+    || return 0
+
+  local routes
+  routes=$(git -C "$app_dir" diff "${base}...HEAD" -- src 2>/dev/null \
+    | grep -E '^\+' \
+    | grep -oE 'path="[^"]+"' \
+    | sed -E 's/^path="//; s/"$//' \
+    | grep -v '^/$' \
+    | sort -u)
+
+  if [ -z "$routes" ]; then
+    echo "      (this branch added no new routes — navigate normally)"
+    return 0
+  fi
+  local r path
+  while IFS= read -r r; do
+    path="${r//:yearMonth/2026-5}"
+    if printf '%s' "$path" | grep -q ':'; then
+      echo "      http://localhost:5173${path}   (replace :params with real ids)"
+    else
+      echo "      http://localhost:5173${path}"
+    fi
+  done <<EOF
+$routes
+EOF
+}
+
 # Detailed, copy-pasteable steps to run the verified branch by hand. Printed only
 # after a PASS verdict, so you always know how to manually test what just shipped.
 print_run_locally() {
@@ -350,6 +388,11 @@ RUNHELP
   echo ""
   echo "    No login screen — the seeded dev user is auto-signed-in, so seed data is visible."
   echo "    Stop with Ctrl-C; run 'supabase stop' to shut the local stack down."
+  echo ""
+  echo "    NOTE: a ticket can add a route without a sidebar/tab link to reach it"
+  echo "    (the gates navigate by URL, so they pass regardless). If you don't see"
+  echo "    this feature in the UI, open the route(s) this branch added directly:"
+  print_new_routes "$app_dir"
   print_divider
 }
 
