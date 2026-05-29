@@ -1,12 +1,38 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
+import { useMonthId } from "@/hooks/useMonthId";
+import { useSources } from "@/hooks/useSources";
+import { SourcesPanel } from "@/components/SourcesPanel";
+
+type HalfFilter = "all" | "half1" | "half2";
 
 export function OverviewPage() {
   const { yearMonth } = useParams<{ yearMonth: string }>();
   const [year, month] = (yearMonth ?? "").split("-");
+  const [halfFilter, setHalfFilter] = useState<HalfFilter>("all");
 
   const monthName = new Date(Number(year), Number(month) - 1).toLocaleString("en-PH", {
     month: "long",
     year: "numeric",
+  });
+
+  const { monthId, loading: monthIdLoading } = useMonthId(yearMonth ?? "");
+  const { sources, payments, loading: sourcesLoading, addSource, updateSource, deleteSource } = useSources(monthId);
+
+  const loading = monthIdLoading || sourcesLoading;
+
+  const filterBtnStyle = (active: boolean): React.CSSProperties => ({
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    padding: "5px 12px",
+    borderRadius: 5,
+    cursor: "pointer",
+    border: active ? "1px solid var(--color-ink-3)" : "1px solid var(--color-rule)",
+    background: active ? "var(--color-ink)" : "var(--color-linen-2)",
+    color: active ? "var(--color-linen)" : "var(--color-ink-3)",
+    transition: "background 0.1s, color 0.1s, border-color 0.1s",
   });
 
   return (
@@ -50,17 +76,45 @@ export function OverviewPage() {
 
       <div
         style={{
-          background: "var(--color-linen-2)",
-          border: "1px solid var(--color-rule)",
-          borderRadius: 8,
-          padding: "28px",
-          color: "var(--color-ink-3)",
-          fontSize: 14,
-          textAlign: "center",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          marginBottom: 20,
         }}
       >
-        Month overview for {monthName} — budget data will appear here.
+        <button
+          data-testid="half-filter-all"
+          style={filterBtnStyle(halfFilter === "all")}
+          onClick={() => setHalfFilter("all")}
+        >
+          All
+        </button>
+        <button
+          data-testid="half-filter-half1"
+          style={filterBtnStyle(halfFilter === "half1")}
+          onClick={() => setHalfFilter("half1")}
+        >
+          1st Half
+        </button>
+        <button
+          data-testid="half-filter-half2"
+          style={filterBtnStyle(halfFilter === "half2")}
+          onClick={() => setHalfFilter("half2")}
+        >
+          2nd Half
+        </button>
       </div>
+
+      <SourcesPanel
+        monthId={monthId ?? ""}
+        sources={sources}
+        payments={payments}
+        loading={loading}
+        halfFilter={halfFilter}
+        onAddSource={addSource}
+        onUpdateSource={updateSource}
+        onDeleteSource={deleteSource}
+      />
     </div>
   );
 }
