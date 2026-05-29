@@ -54,6 +54,105 @@ heartbeat() {
   done
 }
 
+# Check every box, swap the label to `completed`, and close the issue.
+close_issue() {
+  local body_file=$1
+  local checked
+  checked=$(mktemp)
+  sed 's/^- \[ \]/- [x]/' "$body_file" > "$checked"
+  gh issue edit "$ISSUE" --repo "$REPO" --body-file "$checked" >/dev/null 2>&1 || true
+  gh label create completed --repo "$REPO" --color 6F42C1 \
+    --description "Implemented, merged, and verified" >/dev/null 2>&1 || true
+  gh issue edit "$ISSUE" --repo "$REPO" \
+    --remove-label "ready-for-agent" --add-label "completed" >/dev/null 2>&1 || true
+  if gh issue close "$ISSUE" --repo "$REPO" \
+       --comment "All acceptance criteria verified and signed off via run-ticket.sh. Closing." >/dev/null 2>&1; then
+    echo "  ✔ Issue #${ISSUE} closed and labeled 'completed'."
+  else
+    echo "  ⚠ Issue close may have failed — check #${ISSUE} manually."
+  fi
+  rm -f "$checked"
+}
+
+# Interactive acceptance-criteria sign-off (host-side), then close on all-pass.
+# Mirrors the /close-issue skill: verify each criterion one by one; close only
+# if every one passes. Reads from /dev/tty so it never hangs non-interactively.
+verify_and_close() {
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "  ⚠ gh CLI not found on host — verify and close #${ISSUE} manually."
+    return
+  fi
+
+  echo ""
+  print_divider
+  echo "  ACCEPTANCE CRITERIA SIGN-OFF — issue #${ISSUE}"
+  print_divider
+  echo "  Test the running app first (see the run-locally steps above)."
+  printf "  Ready to verify acceptance criteria now? [y/N] "
+  local ready=""
+  read -r ready < /dev/tty 2>/dev/null || ready=""
+  if [[ ! "$ready" =~ ^[Yy]$ ]]; then
+    echo "  Skipped. Re-run verification later or close #${ISSUE} manually."
+    return
+  fi
+
+  local body_file
+  body_file=$(mktemp)
+  if ! gh issue view "$ISSUE" --repo "$REPO" --json body -q .body > "$body_file" 2>/dev/null; then
+    echo "  ⚠ Could not fetch issue #${ISSUE} from ${REPO}. Skipping."
+    rm -f "$body_file"
+    return
+  fi
+
+  # Extract checklist lines under the "## Acceptance criteria" heading only.
+  local criteria
+  criteria=$(awk '
+    /^##[[:space:]]+[Aa]cceptance criteria/ {inblock=1; next}
+    inblock && /^##[[:space:]]/ {inblock=0}
+    inblock && /^- \[[ xX]\]/ {print}
+  ' "$body_file")
+
+  if [ -z "$criteria" ]; then
+    echo "  ⚠ No acceptance-criteria checklist found in issue #${ISSUE}."
+    printf "  Close the issue anyway? [y/N] "
+    local force=""
+    read -r force < /dev/tty 2>/dev/null || force=""
+    if [[ "$force" =~ ^[Yy]$ ]]; then close_issue "$body_file"; fi
+    rm -f "$body_file"
+    return
+  fi
+
+  local total=0 failed=0 failed_list=""
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    total=$((total + 1))
+    local text
+    text=$(printf '%s' "$line" | sed -E 's/^- \[[ xX]\] //')
+    echo ""
+    echo "  [${total}] ${text}"
+    printf "      Passed? [y/n] "
+    local ans=""
+    read -r ans < /dev/tty 2>/dev/null || ans=""
+    if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+      failed=$((failed + 1))
+      failed_list+="    ✘ ${text}"$'\n'
+    fi
+  done <<< "$criteria"
+
+  echo ""
+  print_divider
+  if [ "$failed" -eq 0 ]; then
+    echo "  ✔ All ${total} acceptance criteria passed. Closing issue #${ISSUE}..."
+    close_issue "$body_file"
+  else
+    echo "  ✘ ${failed}/${total} criteria failed — issue #${ISSUE} left OPEN:"
+    printf "%s" "$failed_list"
+    echo "  Fix the failing items, then re-run or close manually."
+  fi
+  print_divider
+  rm -f "$body_file"
+}
+
 write_base_prompt() {
   cat <<'STATICPROMPT'
 You are implementing a ticket for the FamilyBudget app. You are running NON-INTERACTIVELY inside a Docker container. Do NOT ask for approval, confirmation, or permission at any point. Just execute.
@@ -231,6 +330,9 @@ while [ $ATTEMPT -lt $MAX_RETRIES ]; do
     echo ""
     echo "  Merge feat/${BRANCH} into main when ready."
     print_divider
+
+    verify_and_close
+
     exit 0
   fi
 
