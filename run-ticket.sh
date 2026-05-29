@@ -230,8 +230,23 @@ VPROMPT
     budget-agent \
     bash -c "gh auth setup-git >/dev/null 2>&1 || true; cd ${AGENT_HOME}/project && git checkout feat/${BRANCH} 2>/dev/null; claude --model ${VERIFIER_MODEL} -p \"\$(cat /tmp/vprompt.txt)\" --dangerously-skip-permissions" \
     >/dev/null
-  docker logs -f "$vcontainer" 2>&1 | tee "$vlog"
+  echo "  (headless verifier is silent until it finishes — heartbeat below confirms it's alive)"
+  local v_start; v_start=$(date +%s)
+  # Stream logs with a live elapsed prefix...
+  ( docker logs -f "$vcontainer" 2>&1 \
+      | while IFS= read -r line; do
+          printf '  [%s] %s\n' "$(elapsed_since "$v_start")" "$line"
+        done \
+      | tee "$vlog" ) &
+  local vstream=$!
+  # ...plus a heartbeat while the container is actually running.
+  while [ "$(docker inspect -f '{{.State.Running}}' "$vcontainer" 2>/dev/null)" = "true" ]; do
+    sleep 10
+    [ "$(docker inspect -f '{{.State.Running}}' "$vcontainer" 2>/dev/null)" = "true" ] || break
+    printf '  ⏱  verifier still running — elapsed %s\n' "$(elapsed_since "$v_start")"
+  done
   docker wait "$vcontainer" >/dev/null 2>&1
+  wait "$vstream" 2>/dev/null
   docker rm -f "$vcontainer" >/dev/null 2>&1 || true
   set -e
 
@@ -286,6 +301,36 @@ verify_and_close() {
   close_issue "$body_file"
   print_divider
   rm -f "$body_file"
+
+  print_run_locally "$app_dir"
+}
+
+# Detailed, copy-pasteable steps to run the verified branch by hand. Printed only
+# after a PASS verdict, so you always know how to manually test what just shipped.
+print_run_locally() {
+  local app_dir=$1
+  echo ""
+  print_divider
+  echo "  ▶ RUN IT YOURSELF — manually test feat/${BRANCH} (issue #${ISSUE})"
+  print_divider
+  echo "    cd ${app_dir}"
+  cat <<'RUNHELP'
+
+    supabase start          # boot local Postgres/Auth (no-op if already up)
+    supabase db reset       # apply migrations + seed (incl. the dev auto-login user)
+
+    # write .env.local with the REAL local anon key:
+    URL=$(supabase status -o json | sed -n 's/.*"API_URL": *"\([^"]*\)".*/\1/p')
+    KEY=$(supabase status -o json | sed -n 's/.*"ANON_KEY": *"\([^"]*\)".*/\1/p')
+    printf 'VITE_SUPABASE_URL=%s\nVITE_SUPABASE_ANON_KEY=%s\n' "$URL" "$KEY" > .env.local
+
+    bun install
+    bun run dev             # open the printed localhost URL
+RUNHELP
+  echo ""
+  echo "    No login screen — the seeded dev user is auto-signed-in, so seed data is visible."
+  echo "    Stop with Ctrl-C; run 'supabase stop' to shut the local stack down."
+  print_divider
 }
 
 write_base_prompt() {
