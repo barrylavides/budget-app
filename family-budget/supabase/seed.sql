@@ -1,10 +1,50 @@
 -- Seed: May 2026 test data
 -- This seed runs after migrations and inserts a household, month, sources, expenses, and payments.
 
+-- ─── DEV AUTH (local only) ────────────────────────────────────────────
+-- Every table is RLS-gated through user_household_ids() = the households the
+-- current auth.uid() belongs to. Real auth (Google OAuth) lands in issue #11;
+-- until then, tickets #3–#10 need an authenticated session locally or RLS
+-- returns nothing. We seed a confirmed dev user + identity + membership so the
+-- app (via src/lib/devAuth.ts, DEV-only) can sign in and actually see data.
+-- NOTE: the empty-string token columns are required — GoTrue fails sign-in
+-- ("Database error querying schema") if they are NULL. Remove this block when
+-- issue #11 replaces it with real OAuth.
+insert into auth.users (
+  instance_id, id, aud, role, email, encrypted_password,
+  email_confirmed_at, created_at, updated_at,
+  raw_app_meta_data, raw_user_meta_data, is_sso_user, is_anonymous,
+  confirmation_token, recovery_token, email_change_token_new, email_change,
+  email_change_token_current, phone_change, phone_change_token, reauthentication_token
+) values (
+  '00000000-0000-0000-0000-000000000000',
+  'a0000000-0000-0000-0000-000000000001',
+  'authenticated', 'authenticated', 'dev@familybudget.local',
+  crypt('devpass123456', gen_salt('bf')),
+  now(), now(), now(),
+  '{"provider":"email","providers":["email"]}', '{}', false, false,
+  '', '', '', '', '', '', '', ''
+)
+on conflict (id) do nothing;
+
+insert into auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
+values (
+  gen_random_uuid(),
+  'a0000000-0000-0000-0000-000000000001',
+  jsonb_build_object('sub','a0000000-0000-0000-0000-000000000001','email','dev@familybudget.local','email_verified',true),
+  'email', 'a0000000-0000-0000-0000-000000000001', now(), now(), now()
+)
+on conflict do nothing;
+
 -- Create a test household
 insert into households (id, name)
 values ('00000000-0000-0000-0000-000000000001', 'Barry & Wife')
 on conflict (id) do nothing;
+
+-- Link the dev user to the household so user_household_ids() resolves
+insert into household_members (household_id, user_id, display_name, role)
+values ('00000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'Dev User', 'owner')
+on conflict (household_id, user_id) do nothing;
 
 -- Create May 2026 month
 insert into months (id, household_id, year, month_num, half1_salary_date, half2_salary_date, label)
