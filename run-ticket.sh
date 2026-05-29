@@ -232,21 +232,29 @@ VPROMPT
     >/dev/null
   echo "  (headless verifier is silent until it finishes — heartbeat below confirms it's alive)"
   local v_start; v_start=$(date +%s)
-  # Stream logs with a live elapsed prefix...
-  ( docker logs -f "$vcontainer" 2>&1 \
-      | while IFS= read -r line; do
-          printf '  [%s] %s\n' "$(elapsed_since "$v_start")" "$line"
-        done \
-      | tee "$vlog" ) &
-  local vstream=$!
-  # ...plus a heartbeat while the container is actually running.
-  while [ "$(docker inspect -f '{{.State.Running}}' "$vcontainer" 2>/dev/null)" = "true" ]; do
-    sleep 10
-    [ "$(docker inspect -f '{{.State.Running}}' "$vcontainer" 2>/dev/null)" = "true" ] || break
-    printf '  ⏱  verifier still running — elapsed %s\n' "$(elapsed_since "$v_start")"
-  done
+  # Single reader loop (see run-attempt loop for the read -t / bash-3.2 EOF
+  # rationale): log lines print on their own line; the heartbeat ticks IN PLACE
+  # between them, and a still-running container distinguishes a timeout from EOF.
+  local hb_live=0 line rc
+  : > "$vlog"
+  while :; do
+    IFS= read -r -t 10 line; rc=$?
+    if [ $rc -eq 0 ]; then
+      [ "$hb_live" = 1 ] && printf '\n'
+      hb_live=0
+      # Terminal gets the elapsed prefix; $vlog gets the RAW line so the
+      # `^[[:space:]]*VERDICT:` grep below can anchor at line start.
+      printf '  [%s] %s\n' "$(elapsed_since "$v_start")" "$line"
+      printf '%s\n' "$line" >> "$vlog"
+    elif [ "$(docker inspect -f '{{.State.Running}}' "$vcontainer" 2>/dev/null)" = "true" ]; then
+      printf '\r  ⏱  verifier still running — elapsed %s' "$(elapsed_since "$v_start")"
+      hb_live=1
+    else
+      break
+    fi
+  done < <(docker logs -f "$vcontainer" 2>&1)
+  [ "$hb_live" = 1 ] && printf '\n'
   docker wait "$vcontainer" >/dev/null 2>&1
-  wait "$vstream" 2>/dev/null
   docker rm -f "$vcontainer" >/dev/null 2>&1 || true
   set -e
 
@@ -477,25 +485,35 @@ while [ $ATTEMPT -lt $MAX_RETRIES ]; do
     echo "  ⚠ docker run failed to start (rc ${RUN_RC})."
     EXIT_CODE=$RUN_RC
   else
-    # Stream logs with a live elapsed-time prefix; this exits when the container
-    # stops, so no pipe can keep it alive.
-    ( docker logs -f "$CONTAINER" 2>&1 \
-        | while IFS= read -r line; do
-            printf '[%s] %s\n' "$(elapsed_since "$ATTEMPT_START")" "$line"
-          done \
-        | tee "$ATTEMPT_LOG" ) &
-    STREAM_PID=$!
-
-    # Heartbeat ONLY while the container is actually running — re-checking after
-    # the sleep means no stray tick prints once it has stopped.
-    while [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" = "true" ]; do
-      sleep 10
-      [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" = "true" ] || break
-      printf '  ⏱  still running — elapsed %s\n' "$(elapsed_since "$ATTEMPT_START")"
-    done
+    # Single reader loop so log lines and the heartbeat never race for the
+    # terminal. macOS ships bash 3.2, where `read -t` returns rc 1 for BOTH a
+    # timeout and real EOF — indistinguishable by status. So on any non-zero
+    # read we ask Docker: still running means it was a timeout (no new log →
+    # tick the elapsed counter IN PLACE with \r); stopped means the stream hit
+    # EOF and drained, so we're done.
+    HEARTBEAT_LIVE=0
+    while :; do
+      IFS= read -r -t 10 line; rc=$?
+      if [ $rc -eq 0 ]; then
+        # A real log line arrived — close any in-place heartbeat with a newline,
+        # then print + persist the prefixed line.
+        [ "$HEARTBEAT_LIVE" = 1 ] && printf '\n'
+        HEARTBEAT_LIVE=0
+        prefixed="[$(elapsed_since "$ATTEMPT_START")] $line"
+        printf '%s\n' "$prefixed"
+        printf '%s\n' "$prefixed" >> "$ATTEMPT_LOG"
+      elif [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" = "true" ]; then
+        # Timed out with no new log — tick the same line, just bumping the time.
+        printf '\r  ⏱  still running — elapsed %s' "$(elapsed_since "$ATTEMPT_START")"
+        HEARTBEAT_LIVE=1
+      else
+        break   # container stopped → stream is at EOF
+      fi
+    done < <(docker logs -f "$CONTAINER" 2>&1)
+    # Terminate a dangling in-place heartbeat so later output starts on a fresh line.
+    [ "$HEARTBEAT_LIVE" = 1 ] && printf '\n'
 
     EXIT_CODE=$(docker wait "$CONTAINER" 2>/dev/null || echo 1)
-    wait "$STREAM_PID" 2>/dev/null
   fi
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   set -e
