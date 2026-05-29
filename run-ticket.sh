@@ -154,6 +154,18 @@ run_host_gates() {
   pushd "$app_dir" >/dev/null
 
   pkill -f "vite" >/dev/null 2>&1 || true
+
+  # Static guard: the agent runs in a container under /home/agent, and sometimes
+  # bakes that absolute path into a source/test import. It resolves in the
+  # container but not here on the host, so it would only blow up later as a
+  # cryptic "Cannot find module". Catch it instantly and point at the offender.
+  echo "  ⚙ [gate] no container-absolute paths"
+  if grep -rIn "/home/agent" src e2e >/tmp/gate-paths.log 2>/dev/null; then
+    GATE_FAIL="container-absolute path in source"
+    echo "    ── offending lines (use relative or @-alias imports) ──"; cat /tmp/gate-paths.log
+    popd >/dev/null; return 1
+  fi
+
   echo "  ⚙ [gate] bun install"
   bun install >/tmp/gate-install.log 2>&1 || { GATE_FAIL="bun install"; popd >/dev/null; return 1; }
 
@@ -382,6 +394,7 @@ QUALITY BAR:
 - type-check, build, test, and the AC Playwright suite must all be green on a clean checkout — an independent verifier re-runs them after you push and will reopen the ticket if any fail.
 
 CRITICAL RULES:
+- NEVER hardcode absolute filesystem paths (e.g. /home/agent/project/...) in source or tests. Such paths exist only inside THIS container; the independent verifier and the gates run on a DIFFERENT host where they do not resolve, so the test will fail with "Cannot find module". Use RELATIVE imports (e.g. "../src/budget-engine/index.ts") or the "@" alias instead.
 - You are running non-interactively. Do NOT ask for approval, confirmation, or permission. Just execute.
 - Do NOT propose a commit message and wait — run the git commit command directly.
 - Do NOT stop after committing — you MUST push immediately after.
