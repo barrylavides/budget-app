@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMonthId } from "@/hooks/useMonthId";
 import { useSources } from "@/hooks/useSources";
+import { useExpenses } from "@/hooks/useExpenses";
 import { SourcesPanel } from "@/components/SourcesPanel";
+import { ExpensesTable } from "@/components/ExpensesTable";
 
 type HalfFilter = "all" | "half1" | "half2";
 
@@ -17,7 +19,24 @@ export function OverviewPage() {
   });
 
   const { monthId, loading: monthIdLoading } = useMonthId(yearMonth ?? "");
-  const { sources, payments, loading: sourcesLoading, addSource, updateSource, deleteSource } = useSources(monthId);
+  const { sources, loading: sourcesLoading, addSource, updateSource, deleteSource } = useSources(monthId);
+  const { expenses, loading: expensesLoading, addPayment, deletePayment } = useExpenses(monthId);
+
+  // Derive all payments from expenses so SourcesPanel balance reflects actual payment data
+  // (re-computed whenever useExpenses refreshes after add/delete payment)
+  const allPayments = expenses.flatMap((e) =>
+    e.payments.map((p) => ({
+      id: p.id,
+      amount: p.amount,
+      source_id: p.source_id,
+      expense_id: p.expense_id,
+      paid_on: p.paid_on,
+      note: p.note,
+      created_at: p.created_at,
+      created_by: p.created_by,
+      updated_at: p.updated_at,
+    }))
+  );
 
   const loading = monthIdLoading || sourcesLoading;
 
@@ -108,13 +127,24 @@ export function OverviewPage() {
       <SourcesPanel
         monthId={monthId ?? ""}
         sources={sources}
-        payments={payments}
+        payments={allPayments}
         loading={loading}
         halfFilter={halfFilter}
         onAddSource={addSource}
         onUpdateSource={updateSource}
         onDeleteSource={deleteSource}
       />
+
+      <div style={{ marginTop: 24 }}>
+        <ExpensesTable
+          expenses={expenses}
+          sources={sources}
+          loading={monthIdLoading || expensesLoading}
+          halfFilter={halfFilter}
+          onAddPayment={addPayment}
+          onDeletePayment={deletePayment}
+        />
+      </div>
     </div>
   );
 }
