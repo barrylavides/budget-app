@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
+import { useMonths } from "@/hooks/useMonths";
+import { AddMonthModal } from "./AddMonthModal";
 
-const MONTHS = [
-  { id: "2026-5", label: "May 2026", short: "MAY" },
-  { id: "2026-4", label: "Apr 2026", short: "APR" },
-  { id: "2026-3", label: "Mar 2026", short: "MAR" },
+const MONTH_SHORT = [
+  "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+  "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 ];
 
 interface AppShellProps {
@@ -14,7 +15,14 @@ interface AppShellProps {
 
 export function AppShell({ children }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [showAddMonth, setShowAddMonth] = useState(false);
   const location = useLocation();
+  const { months, memberCount, householdId, loading, refresh } = useMonths();
+
+  function handleMonthCreated() {
+    setShowAddMonth(false);
+    refresh();
+  }
 
   return (
     <div
@@ -151,37 +159,85 @@ export function AppShell({ children }: AppShellProps) {
             >
               Months
             </span>
-            <button
-              onClick={() => setCollapsed((c) => !c)}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: 4,
-                border: "1px solid var(--color-rule)",
-                background: "var(--color-linen-2)",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "var(--color-ink-4)",
-                fontSize: 12,
-                flexShrink: 0,
-              }}
-            >
-              {collapsed ? "→" : "←"}
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+              {!collapsed && (
+                <button
+                  data-testid="add-month-btn"
+                  onClick={() => setShowAddMonth(true)}
+                  aria-label="Add month"
+                  title="Add month"
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: 4,
+                    border: "1px solid var(--color-rule)",
+                    background: "var(--color-linen-2)",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--color-ink-3)",
+                    fontSize: 16,
+                    lineHeight: 1,
+                  }}
+                >
+                  +
+                </button>
+              )}
+              <button
+                onClick={() => setCollapsed((c) => !c)}
+                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: 4,
+                  border: "1px solid var(--color-rule)",
+                  background: "var(--color-linen-2)",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "var(--color-ink-4)",
+                  fontSize: 12,
+                  flexShrink: 0,
+                }}
+              >
+                {collapsed ? "→" : "←"}
+              </button>
+            </div>
           </div>
 
           {/* Month list */}
-          <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "10px 0" }}>
-            {MONTHS.map((m) => {
-              const href = `/month/${m.id}/overview`;
-              const isActive = location.pathname.startsWith(`/month/${m.id}`);
+          <div
+            style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "10px 0" }}
+          >
+            {loading && months.length === 0 && (
+              <div
+                style={{
+                  padding: "14px",
+                  fontSize: 11,
+                  color: "var(--color-ink-5)",
+                  opacity: collapsed ? 0 : 1,
+                }}
+              >
+                Loading…
+              </div>
+            )}
+
+            {months.map((m) => {
+              const short = MONTH_SHORT[m.month_num - 1];
+              const label = m.label ?? `${short[0]}${short.slice(1).toLowerCase()} ${m.year}`;
+              const monthId = `${m.year}-${m.month_num}`;
+              const href = `/month/${monthId}/overview`;
+              const isActive = location.pathname.startsWith(`/month/${monthId}`);
+              const tooltipLabel = `${label} — ${memberCount} member${memberCount !== 1 ? "s" : ""}`;
+
               return (
                 <Link
                   key={m.id}
                   to={href}
+                  data-testid={`month-item-${monthId}`}
+                  title={collapsed ? tooltipLabel : undefined}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -197,7 +253,9 @@ export function AppShell({ children }: AppShellProps) {
                     transition: "all 0.12s",
                   }}
                 >
+                  {/* Month icon */}
                   <div
+                    data-testid={`month-icon-${monthId}`}
                     style={{
                       width: 28,
                       height: 28,
@@ -212,8 +270,10 @@ export function AppShell({ children }: AppShellProps) {
                       flexShrink: 0,
                     }}
                   >
-                    {m.short}
+                    {short}
                   </div>
+
+                  {/* Month name + sub-label */}
                   <div
                     style={{
                       overflow: "hidden",
@@ -221,20 +281,27 @@ export function AppShell({ children }: AppShellProps) {
                       transition: "opacity 0.15s",
                     }}
                   >
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-ink)" }}>
-                      {m.label}
+                    <div
+                      data-testid={`month-label-${monthId}`}
+                      style={{ fontSize: 12, fontWeight: 600, color: "var(--color-ink)" }}
+                    >
+                      {label}
                     </div>
                     <div
+                      data-testid={`month-sublabel-${monthId}`}
                       style={{
                         fontFamily: "var(--font-mono)",
                         fontSize: 9,
                         color: "var(--color-ink-5)",
                       }}
                     >
-                      2 members
+                      {memberCount} member{memberCount !== 1 ? "s" : ""}
                     </div>
                   </div>
+
+                  {/* User count indicator */}
                   <span
+                    data-testid={`month-user-count-${monthId}`}
                     style={{
                       marginLeft: "auto",
                       fontSize: 11,
@@ -244,7 +311,7 @@ export function AppShell({ children }: AppShellProps) {
                       transition: "opacity 0.15s",
                     }}
                   >
-                    👥 2
+                    👥 {memberCount}
                   </span>
                 </Link>
               );
@@ -260,6 +327,7 @@ export function AppShell({ children }: AppShellProps) {
             />
             <Link
               to="/recurring"
+              title={collapsed ? "Recurring" : undefined}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -305,6 +373,7 @@ export function AppShell({ children }: AppShellProps) {
 
             <Link
               to="/statistics"
+              title={collapsed ? "Statistics" : undefined}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -363,6 +432,16 @@ export function AppShell({ children }: AppShellProps) {
           {children}
         </main>
       </div>
+
+      {/* Add Month Modal */}
+      {householdId && (
+        <AddMonthModal
+          open={showAddMonth}
+          householdId={householdId}
+          onClose={() => setShowAddMonth(false)}
+          onCreated={handleMonthCreated}
+        />
+      )}
     </div>
   );
 }
