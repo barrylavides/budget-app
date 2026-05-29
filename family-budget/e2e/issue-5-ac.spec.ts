@@ -420,7 +420,7 @@ test("budget-engine expTotal, expPaid, expStatus are exported with correct behav
     expStatus,
   } = await import(
     // @ts-expect-error: dynamic import in test context
-    "/home/agent/project/family-budget/src/budget-engine/index.ts"
+    "../src/budget-engine/index.ts"
   );
 
   // expPaid returns 0 for an expense with no payments
