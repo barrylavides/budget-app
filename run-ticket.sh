@@ -32,6 +32,11 @@ fi
 
 AGENT_HOME="/home/agent"
 
+# Host GitHub token, passed into the container so the agent can push over HTTPS
+# itself (via `gh auth setup-git`). Empty if gh is absent/unauthenticated.
+GH_TOKEN="$(gh auth token 2>/dev/null || true)"
+export GH_TOKEN
+
 elapsed_since() {
   local start=$1
   local now=$(date +%s)
@@ -42,16 +47,6 @@ elapsed_since() {
 print_divider() {
   printf '%.0s─' {1..70}
   echo
-}
-
-# Background ticker — keeps the elapsed timer moving during idle stretches
-# (e.g. while the agent is thinking and producing no output).
-heartbeat() {
-  local start=$1
-  while true; do
-    sleep 10
-    printf '  ⏱  still running — elapsed %s\n' "$(elapsed_since "$start")"
-  done
 }
 
 # Check every box, swap the label to `completed`, and close the issue.
@@ -174,7 +169,7 @@ WORKFLOW:
     - Do NOT run `playwright install` — browsers are already available at the system level.
     - Write a smoke test that loads the app, checks for no console errors, and verifies key elements render (topbar, sidebar, content area)
     - Run: `bunx playwright test`
-    - Kill the dev server after tests pass
+    - Kill the dev server after tests pass (e.g. `kill %1` or `pkill -f vite`). Do NOT leave any background process running — it can stall the run.
     - If Playwright tests fail, fix the code until they pass. Import path errors, missing modules, and rendering failures must be fixed.
 12. SELF-CHECK: Go back to the issue's acceptance criteria and verify EACH one is met. If any are not, implement them before proceeding.
 13. Commit and push:
@@ -268,16 +263,19 @@ while [ $ATTEMPT -lt $MAX_RETRIES ]; do
 
   > "$ATTEMPT_LOG"
 
-  # Start the idle ticker, then stream docker output with a live elapsed-time
-  # prefix on every line. Heartbeat is killed as soon as the run returns.
-  heartbeat "$ATTEMPT_START" &
-  HEARTBEAT_PID=$!
+  # Run DETACHED with a name. Streaming the container's stdout via a pipe used to
+  # hang: a dev server the agent left running held the pipe open, so the script
+  # never saw the run finish. Detached mode ties completion to the container's
+  # lifecycle (PID 1) instead — Docker reaps stray children on stop.
+  CONTAINER="budget-agent-t${ISSUE}-${TIMESTAMP}-a${ATTEMPT}"
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 
   set +e
-  docker run --rm \
+  docker run -d --name "$CONTAINER" \
     --network host \
     -e ANTHROPIC_API_KEY \
     -e CLAUDE_CODE_OAUTH_TOKEN \
+    -e GH_TOKEN \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v $HOME/.claude:${AGENT_HOME}/.claude \
     -v $HOME/.claude.json:${AGENT_HOME}/.claude.json \
@@ -285,16 +283,36 @@ while [ $ATTEMPT -lt $MAX_RETRIES ]; do
     -v ${WORK_DIR}:${AGENT_HOME}/project \
     -v ${PROMPT_FILE}:/tmp/prompt.txt:ro \
     budget-agent \
-    bash -c "cd ${AGENT_HOME}/project && { [ -d .git ] || git clone https://github.com/${REPO}.git .; } && claude --model ${MODEL_ID} ${EFFORT_FLAG} -p \"\$(cat /tmp/prompt.txt)\" --dangerously-skip-permissions" < /dev/null 2>&1 \
-    | while IFS= read -r line; do
-        printf '[%s] %s\n' "$(elapsed_since "$ATTEMPT_START")" "$line"
-      done \
-    | tee "$ATTEMPT_LOG"
-  EXIT_CODE=${PIPESTATUS[0]}
-  set -e
+    bash -c "gh auth setup-git >/dev/null 2>&1 || true; cd ${AGENT_HOME}/project && { [ -d .git ] || git clone https://github.com/${REPO}.git .; } && claude --model ${MODEL_ID} ${EFFORT_FLAG} -p \"\$(cat /tmp/prompt.txt)\" --dangerously-skip-permissions" \
+    >/dev/null
+  RUN_RC=$?
 
-  kill "$HEARTBEAT_PID" 2>/dev/null
-  wait "$HEARTBEAT_PID" 2>/dev/null
+  if [ $RUN_RC -ne 0 ]; then
+    echo "  ⚠ docker run failed to start (rc ${RUN_RC})."
+    EXIT_CODE=$RUN_RC
+  else
+    # Stream logs with a live elapsed-time prefix; this exits when the container
+    # stops, so no pipe can keep it alive.
+    ( docker logs -f "$CONTAINER" 2>&1 \
+        | while IFS= read -r line; do
+            printf '[%s] %s\n' "$(elapsed_since "$ATTEMPT_START")" "$line"
+          done \
+        | tee "$ATTEMPT_LOG" ) &
+    STREAM_PID=$!
+
+    # Heartbeat ONLY while the container is actually running — re-checking after
+    # the sleep means no stray tick prints once it has stopped.
+    while [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" = "true" ]; do
+      sleep 10
+      [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" = "true" ] || break
+      printf '  ⏱  still running — elapsed %s\n' "$(elapsed_since "$ATTEMPT_START")"
+    done
+
+    EXIT_CODE=$(docker wait "$CONTAINER" 2>/dev/null || echo 1)
+    wait "$STREAM_PID" 2>/dev/null
+  fi
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  set -e
 
   echo ""
   print_divider
@@ -311,10 +329,16 @@ while [ $ATTEMPT -lt $MAX_RETRIES ]; do
         git add -A
         git commit -m "feat(${BRANCH}): implement ticket #${ISSUE}" 2>&1 || true
       fi
-      echo "  ⚙ Pushing feat/${BRANCH} to origin..."
-      # Each run is a fresh full reimplementation on a dedicated feature branch,
-      # so force-with-lease over any stale remote branch from a prior run.
-      git push -u origin "feat/${BRANCH}" --force-with-lease 2>&1 || true
+      # The workspace clone's origin is HTTPS (no host credentials), so push via
+      # the HOST repo's remote URL, which has working creds. The agent normally
+      # pushes itself now (GH_TOKEN); this is the backstop. Surface failures.
+      HOST_ORIGIN=$(git -C "${SCRIPT_DIR}" remote get-url origin 2>/dev/null || echo "origin")
+      echo "  ⚙ Ensuring feat/${BRANCH} is pushed (via ${HOST_ORIGIN})..."
+      if git push "${HOST_ORIGIN}" "feat/${BRANCH}:refs/heads/feat/${BRANCH}" --force-with-lease 2>&1; then
+        echo "  ✔ feat/${BRANCH} is on origin."
+      else
+        echo "  ⚠ Push failed — work is committed in ${WORK_DIR}; push it manually."
+      fi
       popd > /dev/null
     fi
 
