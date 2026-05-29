@@ -57,8 +57,13 @@ export function sourceRemaining(source: Source, allPayments: Payment[]): number 
   return source.balance - drawn;
 }
 
-/** Total balance across multiple sources. */
+/** Total starting balance across multiple sources. */
 export function sourcesTotal(sources: Source[]): number {
+  return sources.reduce((sum, s) => sum + s.balance, 0);
+}
+
+/** Total starting balance across ALL sources in a month (grand total, no half filter). */
+export function sourcesTotalAll(sources: Source[]): number {
   return sources.reduce((sum, s) => sum + s.balance, 0);
 }
 

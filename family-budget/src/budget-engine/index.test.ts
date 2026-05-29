@@ -5,6 +5,7 @@ import {
   expTotal,
   sourceRemaining,
   sourcesTotal,
+  sourcesTotalAll,
   sourceEffectiveRemaining,
   type Expense,
   type Source,
@@ -124,7 +125,7 @@ describe("sourceRemaining", () => {
     const payments: Payment[] = [
       makePayment({ id: "p1", sourceId: "src-1", amount: 5000 }),
       makePayment({ id: "p2", sourceId: "src-1", amount: 3000 }),
-      makePayment({ id: "p3", sourceId: "src-2", amount: 9999 }), // different source
+      makePayment({ id: "p3", sourceId: "src-2", amount: 9999 }),
     ];
     expect(sourceRemaining(source, payments)).toBe(32000);
   });
@@ -133,6 +134,14 @@ describe("sourceRemaining", () => {
     const source = makeSource({ balance: 1000 });
     const payments: Payment[] = [makePayment({ amount: 1500 })];
     expect(sourceRemaining(source, payments)).toBe(-500);
+  });
+
+  it("returns balance unchanged when payments are for other sources", () => {
+    const source = makeSource({ id: "src-A", balance: 20000 });
+    const payments: Payment[] = [
+      makePayment({ id: "p1", sourceId: "src-B", amount: 5000 }),
+    ];
+    expect(sourceRemaining(source, payments)).toBe(20000);
   });
 });
 
@@ -149,6 +158,40 @@ describe("sourcesTotal", () => {
     ];
     expect(sourcesTotal(sources)).toBe(85000);
   });
+
+  it("handles a single source", () => {
+    const sources = [makeSource({ id: "s1", balance: 12345 })];
+    expect(sourcesTotal(sources)).toBe(12345);
+  });
+});
+
+describe("sourcesTotalAll", () => {
+  it("returns 0 for empty list", () => {
+    expect(sourcesTotalAll([])).toBe(0);
+  });
+
+  it("sums balances of all sources regardless of half", () => {
+    const sources = [
+      makeSource({ id: "s1", balance: 40000, half: "half1" }),
+      makeSource({ id: "s2", balance: 35000, half: "half2" }),
+      makeSource({ id: "s3", balance: 10000, half: "both" }),
+    ];
+    expect(sourcesTotalAll(sources)).toBe(85000);
+  });
+
+  it("sums mixed halves correctly", () => {
+    const sources = [
+      makeSource({ id: "s1", balance: 50000, half: "half1" }),
+      makeSource({ id: "s2", balance: 50000, half: "half2" }),
+      makeSource({ id: "s3", balance: 5000, half: "both" }),
+    ];
+    expect(sourcesTotalAll(sources)).toBe(105000);
+  });
+
+  it("handles a single source", () => {
+    const sources = [makeSource({ id: "s1", balance: 99999 })];
+    expect(sourcesTotalAll(sources)).toBe(99999);
+  });
 });
 
 describe("sourceEffectiveRemaining", () => {
@@ -163,10 +206,9 @@ describe("sourceEffectiveRemaining", () => {
     const payments: Payment[] = [];
     const carryOvers: CarryOver[] = [
       { id: "co1", amount: 5000, sourceId: "src-1", resolvedAt: null },
-      { id: "co2", amount: 3000, sourceId: "src-1", resolvedAt: "2026-05-01" }, // resolved
-      { id: "co3", amount: 2000, sourceId: "src-2", resolvedAt: null }, // different source
+      { id: "co2", amount: 3000, sourceId: "src-1", resolvedAt: "2026-05-01" },
+      { id: "co3", amount: 2000, sourceId: "src-2", resolvedAt: null },
     ];
-    // Only co1 should be deducted: 50000 - 5000 = 45000
     expect(sourceEffectiveRemaining(source, payments, carryOvers)).toBe(45000);
   });
 
@@ -176,7 +218,6 @@ describe("sourceEffectiveRemaining", () => {
     const carryOvers: CarryOver[] = [
       { id: "co1", amount: 5000, sourceId: "src-1", resolvedAt: null },
     ];
-    // 40000 - 10000 - 5000 = 25000
     expect(sourceEffectiveRemaining(source, payments, carryOvers)).toBe(25000);
   });
 
