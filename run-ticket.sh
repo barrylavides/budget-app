@@ -7,6 +7,12 @@ MODEL_SHORT=${3:-sonnet}
 EFFORT=${4:-}
 REPO="barrylavides/budget-app"
 MAX_RETRIES=3
+# Verification knobs (env-overridable):
+#   MANUAL=1     fall back to the old interactive [y/n] sign-off
+#   VERIFIER=0   skip the independent verifier agent (run deterministic gates only)
+MANUAL=${MANUAL:-0}
+VERIFIER=${VERIFIER:-1}
+VERIFIER_MODEL="claude-sonnet-4-6"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/logs"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -21,9 +27,15 @@ trap "rm -f $PROMPT_FILE $ATTEMPT_LOG" EXIT
 case "$MODEL_SHORT" in
   haiku)  MODEL_ID="claude-haiku-4-5-20251001" ;;
   sonnet) MODEL_ID="claude-sonnet-4-6" ;;
-  opus)   MODEL_ID="claude-opus-4-6" ;;
+  opus)   MODEL_ID="claude-opus-4-8" ;;
   *)      MODEL_ID="$MODEL_SHORT" ;;
 esac
+
+# Feature tickets touch DB + UI behavior; haiku has repeatedly under-implemented
+# and mis-verified them. Warn (don't block) when running a feature ticket on haiku.
+if [ "$MODEL_SHORT" = "haiku" ]; then
+  echo "  ⚠ haiku is weak for data-backed UI tickets — sonnet is recommended for these."
+fi
 
 EFFORT_FLAG=""
 if [ -n "$EFFORT" ]; then
@@ -69,20 +81,12 @@ close_issue() {
   rm -f "$checked"
 }
 
-# Interactive acceptance-criteria sign-off (host-side), then close on all-pass.
-# Mirrors the /close-issue skill: verify each criterion one by one; close only
-# if every one passes. Reads from /dev/tty so it never hangs non-interactively.
-verify_and_close() {
-  if ! command -v gh >/dev/null 2>&1; then
-    echo "  ⚠ gh CLI not found on host — verify and close #${ISSUE} manually."
-    return
-  fi
-
+# Fallback: interactive per-criterion sign-off (MANUAL=1). Reads from /dev/tty.
+manual_sign_off() {
   echo ""
   print_divider
-  echo "  ACCEPTANCE CRITERIA SIGN-OFF — issue #${ISSUE}"
+  echo "  MANUAL ACCEPTANCE CRITERIA SIGN-OFF — issue #${ISSUE}"
   print_divider
-  echo "  Test the running app first (see the run-locally steps above)."
   printf "  Ready to verify acceptance criteria now? [y/N] "
   local ready=""
   read -r ready < /dev/tty 2>/dev/null || ready=""
@@ -95,26 +99,17 @@ verify_and_close() {
   body_file=$(mktemp)
   if ! gh issue view "$ISSUE" --repo "$REPO" --json body -q .body > "$body_file" 2>/dev/null; then
     echo "  ⚠ Could not fetch issue #${ISSUE} from ${REPO}. Skipping."
-    rm -f "$body_file"
-    return
+    rm -f "$body_file"; return
   fi
-
-  # Extract checklist lines under the "## Acceptance criteria" heading only.
   local criteria
   criteria=$(awk '
     /^##[[:space:]]+[Aa]cceptance criteria/ {inblock=1; next}
     inblock && /^##[[:space:]]/ {inblock=0}
     inblock && /^- \[[ xX]\]/ {print}
   ' "$body_file")
-
   if [ -z "$criteria" ]; then
     echo "  ⚠ No acceptance-criteria checklist found in issue #${ISSUE}."
-    printf "  Close the issue anyway? [y/N] "
-    local force=""
-    read -r force < /dev/tty 2>/dev/null || force=""
-    if [[ "$force" =~ ^[Yy]$ ]]; then close_issue "$body_file"; fi
-    rm -f "$body_file"
-    return
+    rm -f "$body_file"; return
   fi
 
   local total=0 failed=0 failed_list=""
@@ -123,27 +118,172 @@ verify_and_close() {
     total=$((total + 1))
     local text
     text=$(printf '%s' "$line" | sed -E 's/^- \[[ xX]\] //')
-    echo ""
-    echo "  [${total}] ${text}"
+    echo ""; echo "  [${total}] ${text}"
     printf "      Passed? [y/n] "
     local ans=""
     read -r ans < /dev/tty 2>/dev/null || ans=""
     if [[ ! "$ans" =~ ^[Yy]$ ]]; then
-      failed=$((failed + 1))
-      failed_list+="    ✘ ${text}"$'\n'
+      failed=$((failed + 1)); failed_list+="    ✘ ${text}"$'\n'
     fi
   done <<< "$criteria"
 
-  echo ""
-  print_divider
+  echo ""; print_divider
   if [ "$failed" -eq 0 ]; then
     echo "  ✔ All ${total} acceptance criteria passed. Closing issue #${ISSUE}..."
     close_issue "$body_file"
   else
     echo "  ✘ ${failed}/${total} criteria failed — issue #${ISSUE} left OPEN:"
     printf "%s" "$failed_list"
-    echo "  Fix the failing items, then re-run or close manually."
   fi
+  print_divider
+  rm -f "$body_file"
+}
+
+# Deterministic, host-side quality gates re-run on a CLEAN checkout — we do NOT
+# trust the agent's self-assessment. Sets GATE_FAIL to the failing gate name.
+# These catch exactly the failures that slipped through before: a broken
+# tsconfig/type error (type-check, build) and ACs that don't really work (the
+# agent's per-issue Playwright suite, run independently here).
+run_host_gates() {
+  local app_dir=$1
+  GATE_FAIL=""
+  if ! command -v bun >/dev/null 2>&1 || ! command -v supabase >/dev/null 2>&1; then
+    echo "  ⚠ bun/supabase not on host — cannot run automated gates."
+    GATE_FAIL="missing-tooling"; return 1
+  fi
+  pushd "$app_dir" >/dev/null
+
+  pkill -f "vite" >/dev/null 2>&1 || true
+  echo "  ⚙ [gate] bun install"
+  bun install >/tmp/gate-install.log 2>&1 || { GATE_FAIL="bun install"; popd >/dev/null; return 1; }
+
+  echo "  ⚙ [gate] supabase db reset (migrations + seed)"
+  supabase start >/dev/null 2>&1 || true
+  supabase db reset >/tmp/gate-dbreset.log 2>&1 || { GATE_FAIL="supabase db reset"; tail -15 /tmp/gate-dbreset.log; popd >/dev/null; return 1; }
+
+  # Point the app at the real local stack with the REAL anon key.
+  local url key
+  url=$(supabase status -o json 2>/dev/null | sed -n 's/.*"API_URL": *"\([^"]*\)".*/\1/p')
+  key=$(supabase status -o json 2>/dev/null | sed -n 's/.*"ANON_KEY": *"\([^"]*\)".*/\1/p')
+  if [ -n "$url" ] && [ -n "$key" ]; then
+    printf 'VITE_SUPABASE_URL=%s\nVITE_SUPABASE_ANON_KEY=%s\n' "$url" "$key" > .env.local
+  fi
+
+  local g
+  for g in type-check build test; do
+    echo "  ⚙ [gate] bun run $g"
+    if ! bun run "$g" >"/tmp/gate-$g.log" 2>&1; then
+      GATE_FAIL="bun run $g"; echo "    ── $g output (tail) ──"; tail -25 "/tmp/gate-$g.log"
+      popd >/dev/null; return 1
+    fi
+  done
+
+  echo "  ⚙ [gate] playwright AC suite (bunx playwright test)"
+  bunx playwright install chromium >/dev/null 2>&1 || true
+  if ! bunx playwright test >/tmp/gate-pw.log 2>&1; then
+    GATE_FAIL="playwright AC suite"; echo "    ── playwright output (tail) ──"; tail -30 /tmp/gate-pw.log
+    pkill -f "vite" >/dev/null 2>&1 || true; popd >/dev/null; return 1
+  fi
+  pkill -f "vite" >/dev/null 2>&1 || true
+  popd >/dev/null
+  return 0
+}
+
+# Independent verifier AGENT (separate from the author). A fresh model reads the
+# issue's acceptance criteria and the agent's e2e tests, judges whether each
+# criterion is GENUINELY exercised (not just a render/smoke check), runs the
+# suite, and emits a strict "VERDICT: PASS|FAIL". Sets VERIFIER_VERDICT.
+run_verifier_agent() {
+  VERIFIER_VERDICT="FAIL"
+  if [ "$VERIFIER" != "1" ]; then
+    echo "  ⓘ Verifier agent disabled (VERIFIER=0) — relying on deterministic gates only."
+    VERIFIER_VERDICT="SKIPPED"; return 0
+  fi
+  local vprompt vcontainer vlog
+  vprompt=$(mktemp); vlog=$(mktemp)
+  cat > "$vprompt" <<VPROMPT
+You are an INDEPENDENT VERIFIER running non-interactively. Do NOT implement features, do NOT modify code, do NOT commit or push. Your only job is to judge whether the work for issue ${ISSUE} GENUINELY satisfies its acceptance criteria.
+
+1. supabase start, then supabase db reset (load migrations + seed).
+2. gh issue view ${ISSUE} --repo ${REPO} — read the "## Acceptance criteria" checklist.
+3. Read the e2e tests (especially e2e/issue-${ISSUE}-ac.spec.ts). For EACH acceptance criterion, decide whether a test GENUINELY exercises that behavior against real seeded data — clicking/submitting/navigating and asserting the real outcome. A test that only loads the page and checks the shell/topbar/sidebar render does NOT satisfy any criterion.
+4. Run, and require all to pass: bun run type-check ; bun run build ; bun run test ; bunx playwright test.
+5. A criterion FAILS verification if it has no genuine test, its test is a render/smoke-only check, or any gate fails.
+6. Output a markdown table (criterion | genuinely tested? | notes), then as the VERY LAST LINE output exactly one of:
+   VERDICT: PASS
+   VERDICT: FAIL
+VPROMPT
+
+  echo "  🔎 Independent verifier agent (${VERIFIER_MODEL})..."
+  vcontainer="budget-verify-t${ISSUE}-${TIMESTAMP}"
+  docker rm -f "$vcontainer" >/dev/null 2>&1 || true
+  set +e
+  docker run -d --name "$vcontainer" \
+    --network host \
+    -e ANTHROPIC_API_KEY -e CLAUDE_CODE_OAUTH_TOKEN -e GH_TOKEN \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$HOME/.claude:${AGENT_HOME}/.claude" \
+    -v "$HOME/.claude.json:${AGENT_HOME}/.claude.json" \
+    -v "$HOME/.config/gh:${AGENT_HOME}/.config/gh" \
+    -v "${WORK_DIR}:${AGENT_HOME}/project" \
+    -v "${vprompt}:/tmp/vprompt.txt:ro" \
+    budget-agent \
+    bash -c "gh auth setup-git >/dev/null 2>&1 || true; cd ${AGENT_HOME}/project && git checkout feat/${BRANCH} 2>/dev/null; claude --model ${VERIFIER_MODEL} -p \"\$(cat /tmp/vprompt.txt)\" --dangerously-skip-permissions" \
+    >/dev/null
+  docker logs -f "$vcontainer" 2>&1 | tee "$vlog"
+  docker wait "$vcontainer" >/dev/null 2>&1
+  docker rm -f "$vcontainer" >/dev/null 2>&1 || true
+  set -e
+
+  if grep -qiE '^[[:space:]]*VERDICT:[[:space:]]*PASS' "$vlog"; then
+    VERIFIER_VERDICT="PASS"
+  else
+    VERIFIER_VERDICT="FAIL"
+  fi
+  rm -f "$vprompt" "$vlog"
+}
+
+# Orchestrator: deterministic gates + independent verifier, then auto-close on
+# all-green. No human in the loop by default (that was the point of the script).
+# MANUAL=1 restores the old per-criterion [y/n] sign-off instead.
+verify_and_close() {
+  local app_dir=$1
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "  ⚠ gh CLI not found on host — verify and close #${ISSUE} manually."
+    return
+  fi
+  if [ "$MANUAL" = "1" ]; then
+    manual_sign_off; return
+  fi
+
+  echo ""; print_divider
+  echo "  AUTOMATED VERIFICATION — issue #${ISSUE}"
+  print_divider
+
+  if ! run_host_gates "$app_dir"; then
+    echo ""; print_divider
+    echo "  ✘ GATE FAILED: ${GATE_FAIL} — issue #${ISSUE} left OPEN."
+    echo "  The agent's claim of success was not trusted, and the gate disproved it."
+    echo "  Fix the code and re-run. (Gate logs: /tmp/gate-*.log)"
+    print_divider
+    return
+  fi
+  echo "  ✔ All deterministic gates passed (type-check, build, test, playwright)."
+
+  run_verifier_agent
+  if [ "$VERIFIER_VERDICT" = "FAIL" ]; then
+    echo ""; print_divider
+    echo "  ✘ Independent verifier returned VERDICT: FAIL — issue #${ISSUE} left OPEN."
+    echo "  Gates were green but the verifier judged the AC coverage insufficient."
+    print_divider
+    return
+  fi
+
+  local body_file; body_file=$(mktemp)
+  gh issue view "$ISSUE" --repo "$REPO" --json body -q .body > "$body_file" 2>/dev/null || true
+  echo ""; print_divider
+  echo "  ✔ Gates green + verifier ${VERIFIER_VERDICT}. Auto-closing issue #${ISSUE}..."
+  close_issue "$body_file"
   print_divider
   rm -f "$body_file"
 }
@@ -154,38 +294,39 @@ You are implementing a ticket for the FamilyBudget app. You are running NON-INTE
 
 WORKFLOW:
 
-1. Run `supabase start` in the project root to start the local Supabase instance
-2. Note the anon key and API URL from the output — you will need these
+1. Start the local Supabase instance and LOAD THE SEED:
+   - `supabase start` in the project root, then `supabase db reset` so migrations AND supabase/seed.sql are applied. `supabase start` alone does NOT reliably load the seed; `db reset` does.
+   - Note the API URL and anon key from `supabase status`.
+2. The seed creates a DEV USER and the app auto-signs-in as it in dev mode (src/lib/devAuth.ts). This is what makes RLS-gated data visible locally. If seed data does NOT appear in the running app, that is a BUG to fix — do not work around it.
 3. Read the issue thoroughly: gh issue view ISSUE_NUM --repo REPO_NAME
 4. Read CLAUDE.md for project conventions
 5. Read the PRD for full context: gh issue view 1 --repo REPO_NAME
 6. Create and switch to branch: git checkout -b feat/BRANCH_NAME
 7. Read the "Acceptance criteria" section of the issue carefully. Every checkbox is a requirement you MUST implement. Do not skip any.
 8. Implement each acceptance criterion one by one using /tdd (red-green-refactor loop)
-9. Use the API URL and anon key from step 2 for Supabase connections in .env.local
-10. After implementing everything, run the full test suite: bun run test
-11. VERIFY THE APP RUNS: Start the dev server (`bun run dev &`), then use Playwright to verify the app renders without errors:
-    - Chromium is pre-installed in the container. Just add the dependency: `bun add -d @playwright/test`
-    - Do NOT run `playwright install` — browsers are already available at the system level.
-    - Write a smoke test that loads the app, checks for no console errors, and verifies key elements render (topbar, sidebar, content area)
-    - Run: `bunx playwright test`
-    - Kill the dev server after tests pass (e.g. `kill %1` or `pkill -f vite`). Do NOT leave any background process running — it can stall the run.
-    - If Playwright tests fail, fix the code until they pass. Import path errors, missing modules, and rendering failures must be fixed.
-12. SELF-CHECK: Go back to the issue's acceptance criteria and verify EACH one is met. If any are not, implement them before proceeding.
-13. Commit and push:
+9. Put the API URL and anon key from step 1 in .env.local (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY). Use the REAL anon key printed by `supabase status` — never hand-craft or invent a JWT.
+
+   ─── QUALITY GATES — ALL must pass before you commit. These are hard gates. ───
+10. `bun run type-check` MUST exit 0. Fix every type error. Do NOT silence errors by weakening tsconfig. (A prop-name mismatch is a type error — these gates exist to catch exactly that.)
+11. `bun run build` MUST exit 0.
+12. `bun run test` MUST pass.
+13. DYNAMIC, AC-DRIVEN PLAYWRIGHT VERIFICATION — the tests you write depend ENTIRELY on THIS issue's acceptance criteria:
+    - Add the dependency: `bun add -d @playwright/test`. Chromium is pre-installed; do NOT run `playwright install`.
+    - Create e2e/issue-ISSUE_NUM-ac.spec.ts. For EACH checkbox in the issue's "## Acceptance criteria", write at least one Playwright test, named after that criterion, that EXERCISES it against the running app with real seeded data — e.g. click the thing, assert the resulting navigation/highlight/value; open the form, submit it, assert the new row appears; toggle the control, assert the state change; assert the SEEDED data is actually visible.
+    - A generic smoke test that only loads the page and checks that the shell/topbar/sidebar render is NOT acceptable and does NOT satisfy any acceptance criterion. Derive the tests from the issue text every time; they will differ per issue.
+    - Run: `bunx playwright test`. All AC tests MUST pass. If they fail, fix the CODE (not the tests) until the criteria genuinely pass.
+    - Kill the dev server afterward (`pkill -f vite`). Do NOT leave any background process running.
+14. Commit and push:
     - `git add -A && git commit -m "your message"`
     - `git push -u origin feat/BRANCH_NAME`
     - The work is LOST if you don't push. This is non-negotiable.
-14. Run `supabase stop` to shut down the local instance
+15. Run `supabase stop` to shut down the local instance
 
 QUALITY BAR:
 - A bare Vite scaffold is NOT sufficient. You must implement ALL acceptance criteria from the issue.
-- If the issue says "Tailwind config extends theme with palette X" — configure those exact colors.
-- If the issue says "app shell renders topbar, sidebar, content area" — build those components with proper styling.
-- If the issue says "React Router wired with placeholder routes" — set up those exact routes.
-- If the issue says "seed script inserts test data" — write and run that seed script.
-- If the issue says "pure functions with unit tests" — write both the functions AND the tests.
-- The app must actually render correctly in the browser, not show "Loading..." or unstyled text.
+- The app must actually render correctly in the browser with REAL DATA — not "Loading...", not "No data yet" when seed data exists, not unstyled text.
+- "It renders without console errors" is NOT proof an acceptance criterion is met. Each criterion needs a test that demonstrates the actual behavior the criterion describes.
+- type-check, build, test, and the AC Playwright suite must all be green on a clean checkout — an independent verifier re-runs them after you push and will reopen the ticket if any fail.
 
 CRITICAL RULES:
 - You are running non-interactively. Do NOT ask for approval, confirmation, or permission. Just execute.
@@ -355,7 +496,7 @@ while [ $ATTEMPT -lt $MAX_RETRIES ]; do
     echo "  Merge feat/${BRANCH} into main when ready."
     print_divider
 
-    verify_and_close
+    verify_and_close "$APP_DIR"
 
     exit 0
   fi
