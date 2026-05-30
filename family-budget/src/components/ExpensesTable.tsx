@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { expPaid, expStatus } from "@/budget-engine";
+import { expPaid, expStatus, type ExpenseHalf } from "@/budget-engine";
 import { StatusPill } from "./ui/StatusPill";
 import { PaymentsModal } from "./PaymentsModal";
 import type { Database } from "@/lib/database.types";
@@ -44,7 +44,7 @@ export function ExpensesTable({
 
   const totalBudgeted = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
   const totalPaid = filteredExpenses.reduce((sum, e) => {
-    const ep = expPaid({ id: e.id, amount: e.amount, sourceId: e.source_id ?? "", payments: e.payments.map((p) => ({ id: p.id, amount: p.amount, sourceId: p.source_id ?? "" })) });
+    const ep = expPaid({ id: e.id, amount: e.amount, sourceId: e.source_id ?? "", half: e.half as ExpenseHalf, payments: e.payments.map((p) => ({ id: p.id, amount: p.amount, sourceId: p.source_id ?? "" })) });
     return sum + ep;
   }, 0);
 
@@ -53,6 +53,7 @@ export function ExpensesTable({
       id: e.id,
       amount: e.amount,
       sourceId: e.source_id ?? "",
+      half: e.half as ExpenseHalf,
       payments: e.payments.map((p: Payment) => ({ id: p.id, amount: p.amount, sourceId: p.source_id ?? "" })),
     };
   }

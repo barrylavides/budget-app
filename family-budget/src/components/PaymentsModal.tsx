@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
-import { expPaid } from "@/budget-engine";
+import { expPaid, type ExpenseHalf } from "@/budget-engine";
 import type { Database } from "@/lib/database.types";
 
 type Expense = Database["public"]["Tables"]["expenses"]["Row"];
@@ -54,7 +54,7 @@ export function PaymentsModal({
   if (!expense) return null;
 
   const totalDue = expense.amount;
-  const totalPaid = expPaid({ id: expense.id, amount: expense.amount, sourceId: expense.source_id ?? "", payments: expense.payments.map((p) => ({ id: p.id, amount: p.amount, sourceId: p.source_id ?? "" })) });
+  const totalPaid = expPaid({ id: expense.id, amount: expense.amount, sourceId: expense.source_id ?? "", half: expense.half as ExpenseHalf, payments: expense.payments.map((p) => ({ id: p.id, amount: p.amount, sourceId: p.source_id ?? "" })) });
   const remaining = totalDue - totalPaid;
 
   function handleChange(field: keyof PaymentFormData, value: string) {

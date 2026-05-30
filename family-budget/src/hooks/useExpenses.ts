@@ -2,15 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Database } from "@/lib/database.types";
 
-type Expense = Database["public"]["Tables"]["expenses"]["Row"];
-type Payment = Database["public"]["Tables"]["payments"]["Row"];
+export type ExpenseRow = Database["public"]["Tables"]["expenses"]["Row"];
+export type SourceRow = Database["public"]["Tables"]["sources"]["Row"];
+type DbPayment = Database["public"]["Tables"]["payments"]["Row"];
 
-export interface ExpenseWithPayments extends Expense {
-  payments: Payment[];
+export interface ExpenseWithPayments extends ExpenseRow {
+  payments: DbPayment[];
 }
 
 export interface UseExpensesResult {
   expenses: ExpenseWithPayments[];
+  sources: SourceRow[];
   loading: boolean;
   error: string | null;
   refresh: () => void;
@@ -23,6 +25,7 @@ export interface UseExpensesResult {
 
 export function useExpenses(monthId: string | null): UseExpensesResult {
   const [expenses, setExpenses] = useState<ExpenseWithPayments[]>([]);
+  const [sources, setSources] = useState<SourceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -30,6 +33,7 @@ export function useExpenses(monthId: string | null): UseExpensesResult {
   useEffect(() => {
     if (!monthId) {
       setExpenses([]);
+      setSources([]);
       setLoading(false);
       return;
     }
@@ -40,20 +44,34 @@ export function useExpenses(monthId: string | null): UseExpensesResult {
       setLoading(true);
       setError(null);
 
-      const { data: expenseData, error: expenseErr } = await supabase
-        .from("expenses")
-        .select("*")
-        .eq("month_id", monthId!)
-        .order("created_at", { ascending: true });
+      const [expResult, srcResult] = await Promise.all([
+        supabase
+          .from("expenses")
+          .select("*")
+          .eq("month_id", monthId!)
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("sources")
+          .select("*")
+          .eq("month_id", monthId!)
+          .order("name", { ascending: true }),
+      ]);
 
       if (cancelled) return;
-      if (expenseErr) {
-        setError(expenseErr.message);
+
+      if (srcResult.error) {
+        setError(srcResult.error.message);
+      } else {
+        setSources(srcResult.data ?? []);
+      }
+
+      if (expResult.error) {
+        setError(expResult.error.message);
         setLoading(false);
         return;
       }
 
-      const rows = expenseData ?? [];
+      const rows = expResult.data ?? [];
       if (rows.length === 0) {
         setExpenses([]);
         setLoading(false);
@@ -68,17 +86,19 @@ export function useExpenses(monthId: string | null): UseExpensesResult {
         .order("paid_on", { ascending: true });
 
       if (cancelled) return;
+
       if (paymentErr) {
         setError(paymentErr.message);
         setLoading(false);
         return;
       }
 
-      const paymentsByExpense = new Map<string, Payment[]>();
-      for (const p of paymentData ?? []) {
-        const arr = paymentsByExpense.get(p.expense_id) ?? [];
-        arr.push(p);
-        paymentsByExpense.set(p.expense_id, arr);
+      const payments = paymentData ?? [];
+      const paymentsByExpense = new Map<string, DbPayment[]>();
+      for (const p of payments) {
+        const list = paymentsByExpense.get(p.expense_id) ?? [];
+        list.push(p);
+        paymentsByExpense.set(p.expense_id, list);
       }
 
       setExpenses(rows.map((e) => ({ ...e, payments: paymentsByExpense.get(e.id) ?? [] })));
@@ -119,5 +139,5 @@ export function useExpenses(monthId: string | null): UseExpensesResult {
     [refresh]
   );
 
-  return { expenses, loading, error, refresh, addPayment, deletePayment };
+  return { expenses, sources, loading, error, refresh, addPayment, deletePayment };
 }
