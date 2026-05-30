@@ -1,0 +1,17 @@
+prd to issues
+
+- make sure functionality has a UI if not, specify that I need to test it by typing specific url
+- include UI screenshots in AC
+- data isolation on tests especially for playwright
+- before verification, create PR, then the verifier will review PR and ACs, if all passed, verifier merges the PR
+- using ralph loop, when one of sequential tasks failed, it should create a log and continue where it stopped
+- monitoring dashboard
+- github actions
+- clone budget-app issues as template issues
+  - rearrange issues
+    1. deployment
+    2. github actions, deployment
+
+- option to use jira and other ticket/kanban board aside from github issues
+- i want to update to-issue skill, I want it to give me na option to attach mockups or not
+- codex, pi, open code, cursor compatible
