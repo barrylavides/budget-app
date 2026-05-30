@@ -12,7 +12,8 @@ MAX_RETRIES=3
 #   VERIFIER=0   skip the independent verifier agent (run deterministic gates only)
 MANUAL=${MANUAL:-0}
 VERIFIER=${VERIFIER:-1}
-VERIFIER_MODEL="claude-sonnet-4-6"
+VERIFIER_MODEL="claude-opus-4-8"
+VERIFIER_EFFORT="high"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/logs"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -302,7 +303,7 @@ You are an INDEPENDENT VERIFIER running non-interactively. Do NOT implement feat
    VERDICT: FAIL
 VPROMPT
 
-  echo "  🔎 Independent verifier agent (${VERIFIER_MODEL})..."
+  echo "  🔎 Independent verifier agent (${VERIFIER_MODEL}, effort ${VERIFIER_EFFORT})..."
   vcontainer="budget-verify-t${ISSUE}-${TIMESTAMP}"
   docker rm -f "$vcontainer" >/dev/null 2>&1 || true
   set +e
@@ -316,7 +317,7 @@ VPROMPT
     -v "${WORK_DIR}:${AGENT_HOME}/project" \
     -v "${vprompt}:/tmp/vprompt.txt:ro" \
     budget-agent \
-    bash -c "gh auth setup-git >/dev/null 2>&1 || true; cd ${AGENT_HOME}/project && git checkout feat/${BRANCH} 2>/dev/null; claude --model ${VERIFIER_MODEL} -p \"\$(cat /tmp/vprompt.txt)\" --dangerously-skip-permissions" \
+    bash -c "gh auth setup-git >/dev/null 2>&1 || true; cd ${AGENT_HOME}/project && git checkout feat/${BRANCH} 2>/dev/null; claude --model ${VERIFIER_MODEL} --effort ${VERIFIER_EFFORT} -p \"\$(cat /tmp/vprompt.txt)\" --dangerously-skip-permissions" \
     >/dev/null
   echo "  (headless verifier is silent until it finishes — heartbeat below confirms it's alive)"
   local v_start; v_start=$(date +%s)
