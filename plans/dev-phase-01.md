@@ -10,6 +10,7 @@
 - [Issue #2 Execution — Problems & Solutions](#issue-2-execution--problems--solutions)
 - [Running Agents — Sequential Tickets](#running-agents--sequential-tickets)
 - [Running Agents — Parallel Tickets](#running-agents--parallel-tickets)
+- [Parallel Gate Isolation](#parallel-gate-isolation)
 - [Merging Parallel Branches](#merging-parallel-branches)
 - [Quick Reference](#quick-reference)
 
@@ -331,6 +332,41 @@ After ticket #5 is merged to `main`, run all 3 in separate terminals. Each gets 
 Each agent starts its own Supabase instance, implements the ticket, and shuts Supabase down. Run the convenience script in 3 separate terminals — see [Convenience Script](#convenience-script) for the commands.
 
 Each agent's `supabase start` will allocate its own ports automatically since they run in separate cloned repos inside separate containers.
+
+> ⚠️ **The agent phase is isolated; the post-agent verification gate is NOT.** After an agent pushes, `run-ticket.sh` re-runs the acceptance suite on the **host** (`run_host_gates`), and that gate uses the single shared host stack — see [Parallel Gate Isolation](#parallel-gate-isolation) for why and how it's serialized today.
+
+---
+
+## Parallel Gate Isolation
+
+After an agent finishes, `run-ticket.sh` re-verifies the pushed branch on the host (`run_host_gates`): `supabase db reset` + `bunx playwright test`. Every workspace ships the **same** `supabase/config.toml` (`project_id = "project"`, fixed ports `54321`/`54322`) and Playwright targets a fixed Vite port (`5173`, `reuseExistingServer: true`). So unlike the in-container agent phase, **all host gates share one database and one dev server.**
+
+Running `./run-ticket.sh` for several tickets in parallel therefore lets their gates clobber each other: one gate's `db reset` reseeds the DB while another gate's tests are mid-assertion, and Playwright runs reuse whichever dev server bound `5173` first. This surfaces as *bogus* failures — values that the clean seed can't produce (e.g. half-1 income reading ₱90k instead of ₱85k, a source balance off by one payment, a toast that never renders). The feature code is fine; the environment was contaminated.
+
+There is a second, related race **inside a single gate**: Playwright's default parallel workers run multiple spec files at once against that one DB, and several AC specs mutate global rows or depend on ordering (e.g. an `on delete set null` FK nulling a seeded payment when a "delete source" test runs, shared month fixtures, recurring-template CRUD). So even one gate can flake.
+
+### Current fix — Option A: serialize (implemented)
+
+`run_host_gates` now:
+
+1. **Serializes across parallel runs** with a portable `mkdir` lock (`$TMPDIR/budget-app-gate.lock`; macOS has no `flock`). The lock is held only around the DB-touching region (from `supabase db reset` through Playwright) and released on every exit path; a stale-PID guard reclaims it if a holder dies. Siblings print `⏳ [gate] shared local stack busy — waiting…` and take turns.
+2. **Forces serial tests** with `bunx playwright test --workers=1`, eliminating the intra-suite shared-DB race.
+
+The expensive work — the agent implementing the ticket in its own container — still runs **fully in parallel**. Only the ~30s host gates take turns, so the wall-clock cost is negligible. This is correct and tiny (~5 lines), at the price of gates not overlapping.
+
+### Long-term — Option B: true per-ticket stacks (not yet implemented)
+
+The durable alternative is to give each ticket its **own** Supabase stack so gates can run genuinely in parallel. This should become **config-driven**: before `supabase start`, stamp each workspace's `config.toml` with a unique identity derived from the ticket number, and point Playwright at a matching Vite port — e.g.
+
+```toml
+# workspaces/ticket-<N>/family-budget/supabase/config.toml
+project_id = "ticket-<N>"
+[api]  port = 54321 + N*100
+[db]   port = 54322 + N*100
+# + Playwright webServer.port / baseURL = 5173 + N
+```
+
+`run_host_gates` would then drop the lock (stacks no longer collide) but **keep `--workers=1`** (per-ticket stacks don't fix the intra-suite race). Cost: ~6 GB+ RAM for 3 concurrent stacks (16 GB+ Mac), plus port arithmetic, per-stack teardown, and `.env.local` wiring — which is why it's deferred. **For now we run Option A; Option B is the planned upgrade when parallel gate throughput matters.**
 
 ---
 
