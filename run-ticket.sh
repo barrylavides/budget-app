@@ -139,6 +139,38 @@ manual_sign_off() {
   rm -f "$body_file"
 }
 
+# ── Shared-stack gate lock ───────────────────────────────────────────────────
+# The host gates below all hit ONE local Supabase (project_id="project", fixed
+# ports 54321/54322) and one Vite dev server (:5173). Running ./run-ticket.sh
+# for several tickets in parallel therefore makes their gates clobber each
+# other's database mid-test (a reseed/dev-server race), yielding bogus failures.
+# Until per-ticket stacks exist (see plans/dev-phase-01.md → "Parallel gate
+# isolation"), serialize the gate stage so siblings take turns on the one stack.
+# Portable mkdir-lock (atomic across processes); macOS has no flock.
+GATE_LOCK_DIR="${TMPDIR:-/tmp}/budget-app-gate.lock"
+acquire_gate_lock() {
+  local announced=0
+  until mkdir "$GATE_LOCK_DIR" 2>/dev/null; do
+    if [ "$announced" -eq 0 ]; then
+      echo "  ⏳ [gate] shared local stack busy — waiting for another ticket's gate to finish…"
+      announced=1
+    fi
+    # Reclaim a stale lock whose holder died without releasing.
+    if [ -f "$GATE_LOCK_DIR/pid" ] && ! kill -0 "$(cat "$GATE_LOCK_DIR/pid" 2>/dev/null)" 2>/dev/null; then
+      rm -rf "$GATE_LOCK_DIR"
+    fi
+    sleep 2
+  done
+  echo "$$" > "$GATE_LOCK_DIR/pid"
+}
+release_gate_lock() {
+  # Only remove the lock if THIS process owns it (safe to call unconditionally).
+  if [ -f "$GATE_LOCK_DIR/pid" ] && [ "$(cat "$GATE_LOCK_DIR/pid" 2>/dev/null)" = "$$" ]; then
+    rm -rf "$GATE_LOCK_DIR"
+  fi
+  return 0
+}
+
 # Deterministic, host-side quality gates re-run on a CLEAN checkout — we do NOT
 # trust the agent's self-assessment. Sets GATE_FAIL to the failing gate name.
 # These catch exactly the failures that slipped through before: a broken
@@ -169,9 +201,11 @@ run_host_gates() {
   echo "  ⚙ [gate] bun install"
   bun install >/tmp/gate-install.log 2>&1 || { GATE_FAIL="bun install"; popd >/dev/null; return 1; }
 
+  # From here on we touch the shared local stack — serialize against sibling gates.
+  acquire_gate_lock
   echo "  ⚙ [gate] supabase db reset (migrations + seed)"
   supabase start >/dev/null 2>&1 || true
-  supabase db reset >/tmp/gate-dbreset.log 2>&1 || { GATE_FAIL="supabase db reset"; tail -15 /tmp/gate-dbreset.log; popd >/dev/null; return 1; }
+  supabase db reset >/tmp/gate-dbreset.log 2>&1 || { GATE_FAIL="supabase db reset"; tail -15 /tmp/gate-dbreset.log; release_gate_lock; popd >/dev/null; return 1; }
 
   # Point the app at the real local stack with the REAL anon key.
   local url key
@@ -186,18 +220,23 @@ run_host_gates() {
     echo "  ⚙ [gate] bun run $g"
     if ! bun run "$g" >"/tmp/gate-$g.log" 2>&1; then
       GATE_FAIL="bun run $g"; echo "    ── $g output (tail) ──"; tail -25 "/tmp/gate-$g.log"
-      popd >/dev/null; return 1
+      release_gate_lock; popd >/dev/null; return 1
     fi
   done
 
-  echo "  ⚙ [gate] playwright AC suite (bunx playwright test)"
+  # --workers=1: these AC specs share the one database with no per-test
+  # isolation, and several mutate global rows / depend on ordering (e.g. an
+  # `on delete set null` FK nulling a seeded payment, month fixtures, template
+  # CRUD). Playwright's default parallel workers race each other on that shared
+  # DB. Force serial execution so a ticket's suite is deterministic.
+  echo "  ⚙ [gate] playwright AC suite (bunx playwright test --workers=1)"
   bunx playwright install chromium >/dev/null 2>&1 || true
-  if ! bunx playwright test >/tmp/gate-pw.log 2>&1; then
+  if ! bunx playwright test --workers=1 >/tmp/gate-pw.log 2>&1; then
     GATE_FAIL="playwright AC suite"; echo "    ── playwright output (tail) ──"; tail -30 /tmp/gate-pw.log
-    pkill -f "vite" >/dev/null 2>&1 || true; popd >/dev/null; return 1
+    pkill -f "vite" >/dev/null 2>&1 || true; release_gate_lock; popd >/dev/null; return 1
   fi
   pkill -f "vite" >/dev/null 2>&1 || true
-  popd >/dev/null
+  release_gate_lock; popd >/dev/null
   return 0
 }
 
@@ -219,7 +258,7 @@ You are an INDEPENDENT VERIFIER running non-interactively. Do NOT implement feat
 1. supabase start, then supabase db reset (load migrations + seed).
 2. gh issue view ${ISSUE} --repo ${REPO} — read the "## Acceptance criteria" checklist.
 3. Read the e2e tests (especially e2e/issue-${ISSUE}-ac.spec.ts). For EACH acceptance criterion, decide whether a test GENUINELY exercises that behavior against real seeded data — clicking/submitting/navigating and asserting the real outcome. A test that only loads the page and checks the shell/topbar/sidebar render does NOT satisfy any criterion.
-4. Run, and require all to pass: bun run type-check ; bun run build ; bun run test ; bunx playwright test.
+4. Run, and require all to pass: bun run type-check ; bun run build ; bun run test ; bunx playwright test --workers=1 (serial: the AC specs share one database with no per-test isolation, so parallel workers race each other).
 5. A criterion FAILS verification if it has no genuine test, its test is a render/smoke-only check, or any gate fails.
 6. Output a markdown table (criterion | genuinely tested? | notes), then as the VERY LAST LINE output exactly one of:
    VERDICT: PASS
@@ -325,6 +364,44 @@ verify_and_close() {
   print_run_locally "$app_dir"
 }
 
+# Print the routes THIS branch added, as clickable localhost URLs. Pulled from
+# the diff of React Router <Route path="..."> defs against main, so it works for
+# any ticket without hardcoding. The seeded month fills :yearMonth; any other
+# :param is flagged since we can't know its value. Lets you reach a feature even
+# when the ticket shipped the route but no sidebar/tab link to it.
+print_new_routes() {
+  local app_dir=$1
+  command -v git >/dev/null 2>&1 || return 0
+  local base
+  base=$(git -C "$app_dir" rev-parse --verify -q origin/main 2>/dev/null) \
+    || base=$(git -C "$app_dir" rev-parse --verify -q main 2>/dev/null) \
+    || return 0
+
+  local routes
+  routes=$(git -C "$app_dir" diff "${base}...HEAD" -- src 2>/dev/null \
+    | grep -E '^\+' \
+    | grep -oE 'path="[^"]+"' \
+    | sed -E 's/^path="//; s/"$//' \
+    | grep -v '^/$' \
+    | sort -u)
+
+  if [ -z "$routes" ]; then
+    echo "      (this branch added no new routes — navigate normally)"
+    return 0
+  fi
+  local r path
+  while IFS= read -r r; do
+    path="${r//:yearMonth/2026-5}"
+    if printf '%s' "$path" | grep -q ':'; then
+      echo "      http://localhost:5173${path}   (replace :params with real ids)"
+    else
+      echo "      http://localhost:5173${path}"
+    fi
+  done <<EOF
+$routes
+EOF
+}
+
 # Detailed, copy-pasteable steps to run the verified branch by hand. Printed only
 # after a PASS verdict, so you always know how to manually test what just shipped.
 print_run_locally() {
@@ -350,6 +427,11 @@ RUNHELP
   echo ""
   echo "    No login screen — the seeded dev user is auto-signed-in, so seed data is visible."
   echo "    Stop with Ctrl-C; run 'supabase stop' to shut the local stack down."
+  echo ""
+  echo "    NOTE: a ticket can add a route without a sidebar/tab link to reach it"
+  echo "    (the gates navigate by URL, so they pass regardless). If you don't see"
+  echo "    this feature in the UI, open the route(s) this branch added directly:"
+  print_new_routes "$app_dir"
   print_divider
 }
 
@@ -379,7 +461,7 @@ WORKFLOW:
     - Add the dependency: `bun add -d @playwright/test`. Chromium is pre-installed; do NOT run `playwright install`.
     - Create e2e/issue-ISSUE_NUM-ac.spec.ts. For EACH checkbox in the issue's "## Acceptance criteria", write at least one Playwright test, named after that criterion, that EXERCISES it against the running app with real seeded data — e.g. click the thing, assert the resulting navigation/highlight/value; open the form, submit it, assert the new row appears; toggle the control, assert the state change; assert the SEEDED data is actually visible.
     - A generic smoke test that only loads the page and checks that the shell/topbar/sidebar render is NOT acceptable and does NOT satisfy any acceptance criterion. Derive the tests from the issue text every time; they will differ per issue.
-    - Run: `bunx playwright test`. All AC tests MUST pass. If they fail, fix the CODE (not the tests) until the criteria genuinely pass.
+    - Run: `bunx playwright test --workers=1` (serial — the AC specs share one database with no per-test isolation, so Playwright's default parallel workers race each other on it and flake). All AC tests MUST pass. If they fail, fix the CODE (not the tests) until the criteria genuinely pass — EXCEPT when a pre-existing spec from ANOTHER issue fails only because YOUR new UI legitimately changed the page (e.g. a loose `getByText(...)` now matching multiple elements due to a feature you added); there, tighten that test's locator to a `data-testid` rather than reverting correct product behavior.
     - Kill the dev server afterward (`pkill -f vite`). Do NOT leave any background process running.
 14. Commit and push:
     - `git add -A && git commit -m "your message"`
