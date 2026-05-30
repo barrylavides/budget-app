@@ -176,6 +176,13 @@ release_gate_lock() {
 # These catch exactly the failures that slipped through before: a broken
 # tsconfig/type error (type-check, build) and ACs that don't really work (the
 # agent's per-issue Playwright suite, run independently here).
+#
+# The gates also run AGAINST THE CURRENT main: the branch was built off whatever
+# main looked like when this workspace was cloned, but main has since moved
+# (sibling tickets merged). We merge origin/main in FIRST, so the gates validate
+# the branch as it will actually land — catching both git-level conflicts and
+# semantic ones (a clean auto-merge that no longer type-checks/tests) here,
+# instead of as a surprise on the PR.
 run_host_gates() {
   local app_dir=$1
   GATE_FAIL=""
@@ -186,6 +193,36 @@ run_host_gates() {
   pushd "$app_dir" >/dev/null
 
   pkill -f "vite" >/dev/null 2>&1 || true
+
+  # Sync-with-main gate: merge the latest origin/main into this branch BEFORE the
+  # gates run, so type-check/build/test/playwright below validate the MERGED tree
+  # (how the branch will actually land), not the branch in isolation. A git-level
+  # conflict fails here with the offending files; a clean merge that nonetheless
+  # breaks the build/tests is caught by the gates that follow. We do NOT push the
+  # merge — this is a detection gate; a clean result leaves GitHub's own merge to
+  # do the same combine, while a failure leaves the issue OPEN for manual fixing.
+  # Fetch via the HOST repo's remote (SCRIPT_DIR), which has working creds — the
+  # per-ticket workspace was cloned over HTTPS without them (see the push backstop
+  # below), so its own `origin/main` ref is stale; merging that would be a false
+  # PASS. We pull the live main tip and merge FETCH_HEAD instead.
+  local git_root host_origin
+  git_root=$(git -C "$app_dir" rev-parse --show-toplevel 2>/dev/null || true)
+  host_origin=$(git -C "${SCRIPT_DIR}" remote get-url origin 2>/dev/null || echo origin)
+  if [ -n "$git_root" ]; then
+    echo "  ⚙ [gate] merge latest main into feat/${BRANCH}"
+    if ! git -C "$git_root" fetch "$host_origin" main >/tmp/gate-fetch.log 2>&1; then
+      GATE_FAIL="fetch main (cannot validate against current main)"
+      echo "    ── could not fetch main from ${host_origin} ──"; tail -10 /tmp/gate-fetch.log
+      popd >/dev/null; return 1
+    fi
+    if ! git -C "$git_root" merge --no-edit FETCH_HEAD >/tmp/gate-merge.log 2>&1; then
+      GATE_FAIL="merge conflict with main"
+      echo "    ── conflicting files (resolve against current main, then re-run) ──"
+      git -C "$git_root" diff --name-only --diff-filter=U
+      git -C "$git_root" merge --abort 2>/dev/null || true
+      popd >/dev/null; return 1
+    fi
+  fi
 
   # Static guard: the agent runs in a container under /home/agent, and sometimes
   # bakes that absolute path into a source/test import. It resolves in the
@@ -342,7 +379,7 @@ verify_and_close() {
     print_divider
     return
   fi
-  echo "  ✔ All deterministic gates passed (type-check, build, test, playwright)."
+  echo "  ✔ All deterministic gates passed against current main (merge, type-check, build, test, playwright)."
 
   run_verifier_agent
   if [ "$VERIFIER_VERDICT" = "FAIL" ]; then
