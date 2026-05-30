@@ -2,6 +2,9 @@ import { useState } from "react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { supabase } from "@/lib/supabase";
+import { useToast } from "./ui/Toast";
+import { generateExpenses } from "@/budget-engine/recurring";
+import type { RecurringTemplate, SourceStub } from "@/budget-engine/recurring";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -21,6 +24,7 @@ export function AddMonthModal({ open, householdId, onClose, onCreated }: AddMont
   const [monthNum, setMonthNum] = useState(new Date().getMonth() + 1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { show: showToast } = useToast();
 
   const years = [currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
 
@@ -31,16 +35,14 @@ export function AddMonthModal({ open, householdId, onClose, onCreated }: AddMont
 
     const label = `${MONTH_NAMES[monthNum - 1]} ${year}`;
 
-    const { error: insertErr } = await supabase.from("months").insert({
-      household_id: householdId,
-      year,
-      month_num: monthNum,
-      label,
-    });
-
-    setSaving(false);
+    const { data: newMonth, error: insertErr } = await supabase
+      .from("months")
+      .insert({ household_id: householdId, year, month_num: monthNum, label })
+      .select()
+      .single();
 
     if (insertErr) {
+      setSaving(false);
       if (insertErr.code === "23505") {
         setError("This month already exists for your household.");
       } else {
@@ -49,6 +51,47 @@ export function AddMonthModal({ open, householdId, onClose, onCreated }: AddMont
       return;
     }
 
+    // Materialise recurring expenses for the new month
+    const [{ data: templatesData }, { data: sourcesData }] = await Promise.all([
+      supabase
+        .from("recurring_expense_templates")
+        .select("*")
+        .eq("household_id", householdId),
+      supabase
+        .from("sources")
+        .select("id, name")
+        .eq("month_id", newMonth.id),
+    ]);
+
+    const templates = (templatesData ?? []).map(
+      (t): RecurringTemplate => ({
+        id: t.id,
+        name: t.name,
+        category: t.category,
+        half: t.half,
+        default_amount: t.default_amount,
+        default_source_name: t.default_source_name,
+        tag: t.tag,
+        cadence: t.cadence as "monthly" | "quarterly" | "yearly",
+        active: t.active,
+        start_year_month: t.start_year_month,
+      })
+    );
+
+    const sources = (sourcesData ?? []) as SourceStub[];
+
+    const expenses = generateExpenses(templates, newMonth.id, year, monthNum, sources);
+
+    if (expenses.length > 0) {
+      await supabase.from("expenses").insert(expenses);
+      const count = expenses.length;
+      showToast(
+        `${count} recurring expense${count !== 1 ? "s" : ""} generated — review and adjust`,
+        "success"
+      );
+    }
+
+    setSaving(false);
     onCreated();
   }
 

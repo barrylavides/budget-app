@@ -81,6 +81,20 @@ insert into expenses (id, month_id, name, category, half, amount, source_id, tag
   ('00000000-0000-0000-0000-000000000041', '00000000-0000-0000-0000-000000000010', 'Travel Fund',      'Travel',    'half2', 4000,  '00000000-0000-0000-0000-000000000024', 'savings')
 on conflict (id) do nothing;
 
+-- Recurring expense templates
+insert into recurring_expense_templates (id, household_id, name, category, half, default_amount, default_source_name, tag, cadence, active, start_year_month) values
+  -- Monthly active template (generates every month from Jan 2026)
+  ('00000000-0000-0000-0000-000000000060', '00000000-0000-0000-0000-000000000001', 'Internet Bill', 'Utilities', 'half1', 1500, 'Wife Payroll', 'needs', 'monthly', true, 202601),
+  -- Quarterly active template (generates on months 1, 4, 7, 10)
+  ('00000000-0000-0000-0000-000000000061', '00000000-0000-0000-0000-000000000001', 'Quarterly Tax', 'Bills', 'half2', 2000, null, 'needs', 'quarterly', true, 202601),
+  -- Yearly active template (generates on January each year)
+  ('00000000-0000-0000-0000-000000000062', '00000000-0000-0000-0000-000000000001', 'Annual Insurance', 'Bills', 'half1', 5000, 'Barry Payroll', 'needs', 'yearly', true, 202601),
+  -- Inactive template (should be skipped during generation)
+  ('00000000-0000-0000-0000-000000000063', '00000000-0000-0000-0000-000000000001', 'Inactive Service', 'Bills', 'half1', 500, null, 'needs', 'monthly', false, 202601),
+  -- Future start_year_month (should not generate for months before 202801)
+  ('00000000-0000-0000-0000-000000000064', '00000000-0000-0000-0000-000000000001', 'Future Service', 'Bills', 'half1', 750, null, 'needs', 'monthly', true, 202801)
+on conflict (id) do nothing;
+
 -- Payments for some expenses
 insert into payments (id, expense_id, paid_on, amount, source_id, note) values
   -- Electric Bill: partial payment
