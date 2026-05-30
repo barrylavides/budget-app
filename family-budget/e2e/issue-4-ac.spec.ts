@@ -159,8 +159,8 @@ test("Edit source opens modal pre-filled and saves changes", async ({ page }) =>
   // Modal closes
   await expect(page.locator('role=dialog')).not.toBeVisible({ timeout: 5_000 });
 
-  // Updated name visible
-  await expect(page.getByText("Wife Salary Updated")).toBeVisible({ timeout: 5_000 });
+  // Updated name visible in the sources panel row
+  await expect(page.locator(`[data-testid="source-name-${WIFE_PAYROLL_ID}"]`)).toHaveText("Wife Salary Updated", { timeout: 5_000 });
 });
 
 // AC: Delete source with confirmation
