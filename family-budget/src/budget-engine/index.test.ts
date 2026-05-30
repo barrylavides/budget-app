@@ -3,6 +3,7 @@ import {
   expPaid,
   expStatus,
   expTotal,
+  sourceSpent,
   sourceRemaining,
   sourcesTotal,
   sourcesTotalAll,
@@ -44,6 +45,68 @@ function makePayment(overrides: Partial<Payment> = {}): Payment {
     ...overrides,
   };
 }
+
+describe("expPaid — multi-source payments", () => {
+  it("sums payments across multiple sources", () => {
+    const expense = makeExpense({
+      amount: 5000,
+      payments: [
+        makePayment({ id: "p1", sourceId: "src-1", amount: 2000 }),
+        makePayment({ id: "p2", sourceId: "src-2", amount: 3000 }),
+      ],
+    });
+    expect(expPaid(expense)).toBe(5000);
+  });
+
+  it("overpayment: paid > amount", () => {
+    const expense = makeExpense({ amount: 1000, payments: [makePayment({ amount: 1500 })] });
+    expect(expPaid(expense)).toBe(1500);
+  });
+
+  it("zero balance: no payments", () => {
+    expect(expPaid(makeExpense({ amount: 0, payments: [] }))).toBe(0);
+  });
+});
+
+describe("expStatus — edge cases", () => {
+  it("overpaid: paid > amount returns overpaid", () => {
+    const expense = makeExpense({ amount: 500, payments: [makePayment({ amount: 600 })] });
+    expect(expStatus(expense)).toBe("overpaid");
+  });
+
+  it("partial multi-source: partial payments from different sources", () => {
+    const expense = makeExpense({
+      amount: 10000,
+      payments: [
+        makePayment({ id: "p1", sourceId: "src-1", amount: 3000 }),
+        makePayment({ id: "p2", sourceId: "src-2", amount: 2000 }),
+      ],
+    });
+    expect(expStatus(expense)).toBe("partial");
+  });
+});
+
+describe("sourceSpent", () => {
+  it("returns 0 when no payments", () => {
+    expect(sourceSpent(makeSource(), [])).toBe(0);
+  });
+
+  it("sums only payments belonging to this source", () => {
+    const source = makeSource({ id: "src-1", balance: 40000 });
+    const payments: Payment[] = [
+      makePayment({ id: "p1", sourceId: "src-1", amount: 5000 }),
+      makePayment({ id: "p2", sourceId: "src-1", amount: 3000 }),
+      makePayment({ id: "p3", sourceId: "src-2", amount: 9999 }),
+    ];
+    expect(sourceSpent(source, payments)).toBe(8000);
+  });
+
+  it("zero balance source with payments returns correct spent", () => {
+    const source = makeSource({ id: "src-1", balance: 0 });
+    const payments: Payment[] = [makePayment({ sourceId: "src-1", amount: 500 })];
+    expect(sourceSpent(source, payments)).toBe(500);
+  });
+});
 
 describe("expPaid", () => {
   it("returns 0 for an expense with no payments", () => {

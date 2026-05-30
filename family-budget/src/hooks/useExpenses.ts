@@ -16,6 +16,11 @@ export interface UseExpensesResult {
   loading: boolean;
   error: string | null;
   refresh: () => void;
+  addPayment: (
+    expenseId: string,
+    data: { paid_on: string; amount: number; source_id: string | null; note: string | null }
+  ) => Promise<string | null>;
+  deletePayment: (paymentId: string) => Promise<string | null>;
 }
 
 export function useExpenses(monthId: string | null): UseExpensesResult {
@@ -77,7 +82,8 @@ export function useExpenses(monthId: string | null): UseExpensesResult {
       const { data: paymentData, error: paymentErr } = await supabase
         .from("payments")
         .select("*")
-        .in("expense_id", expenseIds);
+        .in("expense_id", expenseIds)
+        .order("paid_on", { ascending: true });
 
       if (cancelled) return;
 
@@ -107,5 +113,31 @@ export function useExpenses(monthId: string | null): UseExpensesResult {
 
   const refresh = useCallback(() => setTick((t) => t + 1), []);
 
-  return { expenses, sources, loading, error, refresh };
+  const addPayment = useCallback(
+    async (
+      expenseId: string,
+      data: { paid_on: string; amount: number; source_id: string | null; note: string | null }
+    ): Promise<string | null> => {
+      const { error: insertErr } = await supabase.from("payments").insert({
+        expense_id: expenseId,
+        ...data,
+      });
+      if (insertErr) return insertErr.message;
+      refresh();
+      return null;
+    },
+    [refresh]
+  );
+
+  const deletePayment = useCallback(
+    async (paymentId: string): Promise<string | null> => {
+      const { error: deleteErr } = await supabase.from("payments").delete().eq("id", paymentId);
+      if (deleteErr) return deleteErr.message;
+      refresh();
+      return null;
+    },
+    [refresh]
+  );
+
+  return { expenses, sources, loading, error, refresh, addPayment, deletePayment };
 }

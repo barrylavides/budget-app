@@ -48,15 +48,19 @@ export function expTotal(expenses: Expense[]): number {
   return expenses.reduce((sum, e) => sum + e.amount, 0);
 }
 
+/** Total amount spent (paid out) from a source across all payments drawn from it. */
+export function sourceSpent(source: Source, allPayments: Payment[]): number {
+  return allPayments
+    .filter((p) => p.sourceId === source.id)
+    .reduce((sum, p) => sum + p.amount, 0);
+}
+
 /**
  * Remaining balance on a source = balance - sum of all payments drawn from it.
  * Does NOT account for carry-overs; use sourceEffectiveRemaining for that.
  */
 export function sourceRemaining(source: Source, allPayments: Payment[]): number {
-  const drawn = allPayments
-    .filter((p) => p.sourceId === source.id)
-    .reduce((sum, p) => sum + p.amount, 0);
-  return source.balance - drawn;
+  return source.balance - sourceSpent(source, allPayments);
 }
 
 /** Total starting balance across multiple sources. */
