@@ -77,7 +77,7 @@ export function ExpensesTable({
 
       {/* Summary cards */}
       <div
-        data-testid="summary-cards"
+        data-testid="expenses-summary-cards"
         style={{ display: "flex", gap: 10, marginBottom: 16 }}
       >
         <div
