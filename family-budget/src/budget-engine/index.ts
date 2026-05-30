@@ -108,3 +108,5 @@ export function sourceEffectiveRemaining(
     .reduce((sum, co) => sum + co.amount, 0);
   return base - pendingCarryOvers;
 }
+
+export * from "./statistics";
