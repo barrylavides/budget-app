@@ -7,6 +7,9 @@ import {
   sourcesTotal,
   sourcesTotalAll,
   sourceEffectiveRemaining,
+  halfExpenses,
+  halfIncome,
+  totalPaid,
   type Expense,
   type Source,
   type Payment,
@@ -18,6 +21,7 @@ function makeExpense(overrides: Partial<Expense> = {}): Expense {
     id: "exp-1",
     amount: 1000,
     sourceId: "src-1",
+    half: "half1",
     payments: [],
     ...overrides,
   };
@@ -224,5 +228,88 @@ describe("sourceEffectiveRemaining", () => {
   it("handles zero-balance source", () => {
     const source = makeSource({ balance: 0 });
     expect(sourceEffectiveRemaining(source, [], [])).toBe(0);
+  });
+});
+
+describe("halfExpenses", () => {
+  it("returns only expenses for the given half", () => {
+    const expenses = [
+      makeExpense({ id: "e1", half: "half1" }),
+      makeExpense({ id: "e2", half: "half2" }),
+      makeExpense({ id: "e3", half: "half1" }),
+    ];
+    const result = halfExpenses(expenses, "half1");
+    expect(result.map((e) => e.id)).toEqual(["e1", "e3"]);
+  });
+
+  it("returns empty array when no expenses match", () => {
+    const expenses = [
+      makeExpense({ id: "e1", half: "half1" }),
+      makeExpense({ id: "e2", half: "half1" }),
+    ];
+    expect(halfExpenses(expenses, "half2")).toEqual([]);
+  });
+
+  it("returns empty array for empty input", () => {
+    expect(halfExpenses([], "half1")).toEqual([]);
+  });
+
+  it("returns all half2 expenses", () => {
+    const expenses = [
+      makeExpense({ id: "e1", half: "half2", amount: 5000 }),
+      makeExpense({ id: "e2", half: "half1", amount: 3000 }),
+      makeExpense({ id: "e3", half: "half2", amount: 2000 }),
+    ];
+    const result = halfExpenses(expenses, "half2");
+    expect(result).toHaveLength(2);
+    expect(expTotal(result)).toBe(7000);
+  });
+});
+
+describe("halfIncome", () => {
+  it("sums sources for the given half including 'both'", () => {
+    const sources = [
+      makeSource({ id: "s1", half: "half1", balance: 40000 }),
+      makeSource({ id: "s2", half: "half1", balance: 35000 }),
+      makeSource({ id: "s3", half: "half2", balance: 40000 }),
+      makeSource({ id: "s4", half: "both",  balance: 10000 }),
+    ];
+    expect(halfIncome(sources, "half1")).toBe(85000);
+    expect(halfIncome(sources, "half2")).toBe(50000);
+  });
+
+  it("returns 0 for empty sources list", () => {
+    expect(halfIncome([], "half1")).toBe(0);
+  });
+
+  it("includes only 'both' sources when no matching half sources", () => {
+    const sources = [
+      makeSource({ id: "s1", half: "both", balance: 10000 }),
+      makeSource({ id: "s2", half: "half2", balance: 5000 }),
+    ];
+    expect(halfIncome(sources, "half1")).toBe(10000);
+  });
+});
+
+describe("totalPaid", () => {
+  it("returns 0 for empty list", () => {
+    expect(totalPaid([])).toBe(0);
+  });
+
+  it("sums paid amounts across all expenses", () => {
+    const expenses = [
+      makeExpense({ id: "e1", payments: [makePayment({ amount: 1000 })] }),
+      makeExpense({ id: "e2", payments: [makePayment({ amount: 500 }), makePayment({ id: "p2", amount: 500 })] }),
+      makeExpense({ id: "e3", payments: [] }),
+    ];
+    expect(totalPaid(expenses)).toBe(2000);
+  });
+
+  it("handles expenses with no payments", () => {
+    const expenses = [
+      makeExpense({ id: "e1", payments: [] }),
+      makeExpense({ id: "e2", payments: [] }),
+    ];
+    expect(totalPaid(expenses)).toBe(0);
   });
 });

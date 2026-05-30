@@ -15,6 +15,7 @@ function makeExpense(overrides: Partial<Expense> = {}): Expense {
     id: "e1",
     amount: 1000,
     sourceId: "s1",
+    half: "half1",
     payments: [],
     ...overrides,
   };

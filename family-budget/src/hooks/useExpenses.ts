@@ -4,9 +4,14 @@ import type { Database } from "@/lib/database.types";
 
 export type ExpenseRow = Database["public"]["Tables"]["expenses"]["Row"];
 export type SourceRow = Database["public"]["Tables"]["sources"]["Row"];
+type DbPayment = Database["public"]["Tables"]["payments"]["Row"];
+
+export interface ExpenseWithPayments extends ExpenseRow {
+  payments: DbPayment[];
+}
 
 export interface UseExpensesResult {
-  expenses: ExpenseRow[];
+  expenses: ExpenseWithPayments[];
   sources: SourceRow[];
   loading: boolean;
   error: string | null;
@@ -14,20 +19,26 @@ export interface UseExpensesResult {
 }
 
 export function useExpenses(monthId: string | null): UseExpensesResult {
-  const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseWithPayments[]>([]);
   const [sources, setSources] = useState<SourceRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    if (!monthId) return;
+    if (!monthId) {
+      setExpenses([]);
+      setSources([]);
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
     async function load() {
+      setLoading(true);
+      setError(null);
+
       const [expResult, srcResult] = await Promise.all([
         supabase
           .from("expenses")
@@ -43,18 +54,48 @@ export function useExpenses(monthId: string | null): UseExpensesResult {
 
       if (cancelled) return;
 
-      if (expResult.error) {
-        setError(expResult.error.message);
-      } else {
-        setExpenses(expResult.data ?? []);
-      }
-
       if (srcResult.error) {
         setError(srcResult.error.message);
       } else {
         setSources(srcResult.data ?? []);
       }
 
+      if (expResult.error) {
+        setError(expResult.error.message);
+        setLoading(false);
+        return;
+      }
+
+      const rows = expResult.data ?? [];
+      if (rows.length === 0) {
+        setExpenses([]);
+        setLoading(false);
+        return;
+      }
+
+      const expenseIds = rows.map((e) => e.id);
+      const { data: paymentData, error: paymentErr } = await supabase
+        .from("payments")
+        .select("*")
+        .in("expense_id", expenseIds);
+
+      if (cancelled) return;
+
+      if (paymentErr) {
+        setError(paymentErr.message);
+        setLoading(false);
+        return;
+      }
+
+      const payments = paymentData ?? [];
+      const paymentsByExpense = new Map<string, DbPayment[]>();
+      for (const p of payments) {
+        const list = paymentsByExpense.get(p.expense_id) ?? [];
+        list.push(p);
+        paymentsByExpense.set(p.expense_id, list);
+      }
+
+      setExpenses(rows.map((e) => ({ ...e, payments: paymentsByExpense.get(e.id) ?? [] })));
       setLoading(false);
     }
 
