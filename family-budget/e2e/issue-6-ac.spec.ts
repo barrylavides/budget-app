@@ -42,7 +42,22 @@ async function cleanupTestExpenses() {
   );
 }
 
+async function restoreSeedSources() {
+  await fetch(`${SUPABASE_URL}/rest/v1/sources`, {
+    method: "POST",
+    headers: { ...AUTH_HEADERS, Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify([
+      { id: "00000000-0000-0000-0000-000000000020", month_id: SEED_MONTH_ID, name: "Wife Payroll",    type: "salary",             account_label: "BDO",  half: "half1", balance: 40000 },
+      { id: "00000000-0000-0000-0000-000000000021", month_id: SEED_MONTH_ID, name: "Barry Payroll",   type: "salary",             account_label: "BPI",  half: "half1", balance: 35000 },
+      { id: "00000000-0000-0000-0000-000000000022", month_id: SEED_MONTH_ID, name: "Wife 2nd Salary", type: "salary",             account_label: "BDO",  half: "half2", balance: 40000 },
+      { id: "00000000-0000-0000-0000-000000000023", month_id: SEED_MONTH_ID, name: "Barry 2nd",       type: "salary",             account_label: "BPI",  half: "half2", balance: 35000 },
+      { id: "00000000-0000-0000-0000-000000000024", month_id: SEED_MONTH_ID, name: "Savings Fund",    type: "savings_withdrawal", account_label: "CIMB", half: "both",  balance: 10000 },
+    ]),
+  });
+}
+
 test.beforeAll(async () => {
+  await restoreSeedSources();
   await cleanupTestExpenses();
 });
 
